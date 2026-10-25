@@ -30,20 +30,32 @@ notes, press `⌘C`, and paste the marked-up image into ChatGPT, Claude, Cursor 
   </tr>
 </table>
 
-**Install** (not on the Chrome Web Store yet)
+<a id="install"></a>**Install** (not on the Chrome Web Store yet)
 
-1. Install [Node.js](https://nodejs.org) 22 or newer, then run:
-   ```sh
-   git clone https://github.com/limyuquan/pagesnap.git && cd pagesnap
-   corepack enable && pnpm install && pnpm build
-   ```
-2. Open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked** and choose the
-   `pagesnap/.output/chrome-mv3` folder. On a Mac, press `⌘⇧.` in the file picker to show the
-   hidden `.output` folder.
+1. Download `pagesnap-<version>-chrome.zip` from the
+   [latest release](https://github.com/limyuquan/pagesnap/releases/latest) and unzip it. Keep the
+   folder somewhere permanent: Chrome loads the extension from it.
+2. Open `chrome://extensions`, turn on **Developer mode** (top right), click **Load unpacked** and
+   choose the unzipped folder.
 3. Pin Page Snap to the toolbar.
 
-To update later, run `git pull && pnpm build`, then click ↻ on Page Snap's card in
-`chrome://extensions`.
+To update, download the new zip, replace the folder's contents, then click ↻ on Page Snap's card
+in `chrome://extensions`.
+
+<details>
+<summary>Or build it from source</summary>
+
+Install [Node.js](https://nodejs.org) 22 or newer, then:
+
+```sh
+git clone https://github.com/limyuquan/pagesnap.git && cd pagesnap
+corepack enable && pnpm install && pnpm build
+```
+
+Load the `pagesnap/.output/chrome-mv3` folder the same way. On a Mac, press `⌘⇧.` in the file
+picker to show the hidden `.output` folder. To update: `git pull && pnpm build`, then ↻.
+
+</details>
 
 **Use**
 
@@ -93,6 +105,11 @@ pnpm install                # also runs `wxt prepare`
 pnpm build                  # production build → .output/chrome-mv3
 pnpm zip                    # store zip → .output/pagesnap-<version>-chrome.zip
 ```
+
+**Releases.** Bump `version` in `package.json`, commit, then `git tag v<version> && git push origin
+v<version>`. `.github/workflows/release.yml` runs `pnpm check`, builds the zip and attaches it to
+the GitHub Release; users install it with Load unpacked. Ask the user before tagging: releases are
+public.
 
 Loading the extension into the user's own Chrome has to be done by the person. Branded Chrome
 ignores `--load-extension` (since Chrome 137), and you must not drive their browser. Tell them:
