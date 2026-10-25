@@ -1,0 +1,14 @@
+/* Extension pages only (editor, options). Nothing is ever injected into captured pages. Owner: C. */
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-ink: #111111;
+  --color-mark: #ff3b30;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}

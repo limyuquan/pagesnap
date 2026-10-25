@@ -1,0 +1,16 @@
+{
+  // Extension code + Vitest tests. No Node types here, so browser globals (setTimeout -> number)
+  // stay browser-typed. Node-side code (configs, scripts, Playwright) is in tsconfig.node.json.
+  "extends": "./.wxt/tsconfig.json",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true,
+    "jsx": "react-jsx",
+    "types": []
+  },
+  "include": [".wxt/wxt.d.ts", "src", "tests/unit", "tests/browser"]
+}

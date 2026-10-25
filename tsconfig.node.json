@@ -1,0 +1,8 @@
+{
+  // Node-side TypeScript: build/test configs, scripts and Playwright e2e tests.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": [".wxt/wxt.d.ts", "*.config.ts", "scripts", "tests/e2e", "src/shared/e2e.ts"]
+}

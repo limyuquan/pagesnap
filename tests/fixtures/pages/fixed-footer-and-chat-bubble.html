@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: fixed footer and chat bubble</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  Floating elements a full-page capture must not repeat:
+  - a 56 px fixed top bar (#0a84ff, "FIXED TOP BAR"): expected in the first slice only;
+  - a 64 px fixed cookie footer (#2c2c2e, "COOKIE FOOTER"): expected in the last slice only;
+  - a 60 px round chat bubble fixed at bottom-right (#34c759): expected in the last slice only.
+  Body: 6000 px of 500 px bands (bands.html colours), with 56 px top padding for the bar.
+-->
+<style>
+  html, body { margin: 0; padding: 0; }
+  body { font: 16px/1.5 system-ui, sans-serif; color: #111; padding-top: 56px; }
+  .topbar { position: fixed; top: 0; left: 0; right: 0; height: 56px; background: #0a84ff; color: #fff; display: flex; align-items: center; padding: 0 24px; font-weight: 700; z-index: 20; }
+  .footer { position: fixed; bottom: 0; left: 0; right: 0; height: 64px; background: #2c2c2e; color: #fff; display: flex; align-items: center; gap: 16px; padding: 0 24px; font-weight: 600; z-index: 20; }
+  .footer button { font: inherit; padding: 6px 14px; border-radius: 6px; border: 0; background: #fff; color: #111; }
+  .bubble { position: fixed; right: 24px; bottom: 88px; width: 60px; height: 60px; border-radius: 50%; background: #34c759; z-index: 30; box-shadow: 0 4px 12px rgba(0,0,0,.3); }
+  .band { height: 500px; box-sizing: border-box; border-top: 2px solid #000; padding: 16px 24px; font-weight: 600; font-size: 24px; }
+</style>
+</head>
+<body>
+<div class="topbar">FIXED TOP BAR</div>
+<div id="content"></div>
+<div class="footer">COOKIE FOOTER <button type="button">Accept</button></div>
+<div class="bubble" aria-label="Chat"></div>
+<script>
+  const colors = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c'];
+  const content = document.getElementById('content');
+  for (let i = 0; i < 12; i++) {
+    const band = document.createElement('div');
+    band.className = 'band';
+    band.style.background = colors[i % 8];
+    band.textContent = `Band ${i}`;
+    content.append(band);
+  }
+  window.__fixture = {
+    name: 'fixed-footer-and-chat-bubble',
+    cssHeight: 6056,
+    topBar: { height: 56, color: '#0a84ff' },
+    footer: { height: 64, color: '#2c2c2e' },
+    bubble: { size: 60, right: 24, bottom: 88, color: '#34c759' },
+    colors,
+  };
+</script>
+</body>
+</html>

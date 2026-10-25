@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: lazy images</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  Everything a capture must force to render before its slice is taken. All pixels are generated
+  locally (canvas → data URLs); no network.
+  - #native: 10 × <img loading="lazy"> (640 × 320).
+  - #observer: 10 × IntersectionObserver-lazy images: a grey placeholder until the image enters
+    the viewport, then `src` is set after a 250 ms "network" delay.
+  - #reveal: 4 scroll-reveal blocks (opacity 0 → 1 with a 600 ms transition when they enter the viewport).
+  - #cv: 3 `content-visibility: auto` sections whose real height (900 px) differs from their
+    `contain-intrinsic-size` (300 px), so the document grows when they render.
+  Image i is filled with colors[i % 8] and labelled "IMG i".
+-->
+<style>
+  html, body { margin: 0; }
+  body { font: 16px/1.5 system-ui, sans-serif; color: #111; background: #fff; padding: 24px; }
+  figure { margin: 0 0 160px; }
+  img { display: block; width: 640px; height: 320px; background: #cccccc; }
+  figcaption { font-size: 13px; color: #555; }
+  .reveal { height: 300px; margin-bottom: 160px; background: #0a84ff; color: #fff; font: 700 28px system-ui; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 600ms ease; }
+  .reveal.in { opacity: 1; }
+  .cv { content-visibility: auto; contain-intrinsic-size: auto 300px; }
+  .cv .inner { height: 900px; background: repeating-linear-gradient(180deg, #34c759 0 100px, #ffffff 100px 200px); border: 2px solid #000; }
+</style>
+</head>
+<body>
+<h1>Lazy images</h1>
+<section id="native"></section>
+<section id="observer"></section>
+<section id="reveal"></section>
+<section id="cv">
+  <div class="cv"><div class="inner">content-visibility section 0</div></div>
+  <div class="cv"><div class="inner">content-visibility section 1</div></div>
+  <div class="cv"><div class="inner">content-visibility section 2</div></div>
+</section>
+<script>
+  const colors = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c'];
+  function makeImage(i) {
+    const c = document.createElement('canvas');
+    c.width = 640; c.height = 320;
+    const g = c.getContext('2d');
+    g.fillStyle = colors[i % 8];
+    g.fillRect(0, 0, 640, 320);
+    g.fillStyle = '#ffffff';
+    g.font = 'bold 64px system-ui, sans-serif';
+    g.fillText(`IMG ${i}`, 32, 96);
+    return c.toDataURL('image/png');
+  }
+  function figure(i, img, note) {
+    const f = document.createElement('figure');
+    const cap = document.createElement('figcaption');
+    cap.textContent = `Image ${i} (${note})`;
+    f.append(img, cap);
+    return f;
+  }
+
+  const native = document.getElementById('native');
+  for (let i = 0; i < 10; i++) {
+    const img = new Image(640, 320);
+    img.loading = 'lazy';
+    img.alt = `IMG ${i}`;
+    img.src = makeImage(i);
+    native.append(figure(i, img, 'loading=lazy'));
+  }
+
+  const observer = document.getElementById('observer');
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      io.unobserve(e.target);
+      const img = e.target;
+      setTimeout(() => { img.src = img.dataset.src; }, 250);
+    }
+  });
+  for (let i = 10; i < 20; i++) {
+    const img = new Image(640, 320);
+    img.alt = `IMG ${i}`;
+    img.dataset.src = makeImage(i);
+    observer.append(figure(i, img, 'IntersectionObserver'));
+    io.observe(img);
+  }
+
+  const reveal = document.getElementById('reveal');
+  const rio = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) e.target.classList.add('in');
+  });
+  for (let i = 0; i < 4; i++) {
+    const d = document.createElement('div');
+    d.className = 'reveal';
+    d.textContent = `Reveal ${i}`;
+    reveal.append(d);
+    rio.observe(d);
+  }
+
+  window.__fixture = {
+    name: 'lazy-images',
+    imageCount: 20,
+    imageSize: { w: 640, h: 320 },
+    placeholder: '#cccccc',
+    colors,
+    allImagesLoaded: () => [...document.images].every((im) => im.complete && im.naturalWidth > 0),
+  };
+</script>
+</body>
+</html>

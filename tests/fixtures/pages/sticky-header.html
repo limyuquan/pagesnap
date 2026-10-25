@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: sticky header</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  - A 64 px `position: sticky; top: 0` header (#1c1c1e, text "STICKY HEADER"). It must appear
+    exactly once, at the very top of the capture.
+  - A sticky side panel (`top: 88px`) inside the content row. It must appear once, at its natural place.
+  - 5000 px of body content in 500 px bands (same colours as bands.html, starting below the header).
+  - `?jump=1`: header-jump variant. The header starts static; once scrollY > 100 it becomes
+    `position: fixed` and a 64 px placeholder keeps the layout (like many news sites).
+-->
+<style>
+  html, body { margin: 0; padding: 0; }
+  body { font: 16px/1.5 system-ui, sans-serif; color: #111; background: #fff; }
+  header { position: sticky; top: 0; height: 64px; background: #1c1c1e; color: #fff; display: flex; align-items: center; padding: 0 24px; font-weight: 700; z-index: 10; box-sizing: border-box; }
+  header.static { position: static; }
+  header.fixed { position: fixed; left: 0; right: 0; }
+  #placeholder { height: 64px; display: none; }
+  .row { display: flex; }
+  .main { flex: 1; }
+  .band { height: 500px; box-sizing: border-box; border-top: 2px solid #000; padding: 16px 24px; font-weight: 600; font-size: 24px; }
+  aside { width: 240px; }
+  .panel { position: sticky; top: 88px; margin: 24px 16px; height: 200px; background: #ffd60a; padding: 16px; box-sizing: border-box; font-weight: 700; }
+</style>
+</head>
+<body>
+<header id="hdr">STICKY HEADER</header>
+<div id="placeholder"></div>
+<div class="row">
+  <div class="main" id="main"></div>
+  <aside><div class="panel">STICKY PANEL</div></aside>
+</div>
+<script>
+  const colors = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c'];
+  const main = document.getElementById('main');
+  for (let i = 0; i < 10; i++) {
+    const band = document.createElement('div');
+    band.className = 'band';
+    band.style.background = colors[i % 8];
+    band.textContent = `Section ${i}`;
+    main.append(band);
+  }
+  const jump = new URLSearchParams(location.search).has('jump');
+  if (jump) {
+    const hdr = document.getElementById('hdr');
+    const ph = document.getElementById('placeholder');
+    hdr.classList.add('static');
+    const update = () => {
+      const fixed = window.scrollY > 100;
+      hdr.classList.toggle('fixed', fixed);
+      hdr.classList.toggle('static', !fixed);
+      ph.style.display = fixed ? 'block' : 'none';
+    };
+    addEventListener('scroll', update, { passive: true });
+    update();
+  }
+  window.__fixture = { name: 'sticky-header', cssHeight: 5064, headerHeight: 64, headerColor: '#1c1c1e', panelColor: '#ffd60a', jump, colors };
+</script>
+</body>
+</html>

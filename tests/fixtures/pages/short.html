@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: short</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Fits in any viewport >= 400 px tall: no scrolling at all. Capture = exactly one slice. -->
+<style>
+  html, body { margin: 0; background: #ffffff; }
+  body { font: 16px/1.5 system-ui, sans-serif; color: #111; }
+  .box { height: 400px; box-sizing: border-box; padding: 24px; background: #0a84ff; color: #fff; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1 style="margin:0 0 8px">Short page</h1>
+  <p>This page is 400 CSS px tall and never scrolls.</p>
+</div>
+<script>
+  window.__fixture = { name: 'short', cssHeight: 400, boxColor: '#0a84ff', background: '#ffffff' };
+</script>
+</body>
+</html>

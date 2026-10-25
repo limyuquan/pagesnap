@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: bands</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  8000 CSS px tall document: 16 bands of 500 px in a fixed 8-colour cycle (same colours as
+  src/shared/testing/synthetic.ts bandColor()). Each band has a label and 2 px black top rule so
+  seams and off-by-one overlaps show up in pixel assertions.
+-->
+<style>
+  html, body { margin: 0; padding: 0; }
+  body { font: 600 28px/1.2 system-ui, sans-serif; }
+  .band { height: 500px; box-sizing: border-box; border-top: 2px solid #000; padding: 20px 24px; position: relative; }
+  .band span { background: rgba(255,255,255,.85); padding: 4px 10px; }
+  .band .right { position: absolute; right: 24px; bottom: 20px; }
+</style>
+</head>
+<body>
+<div class="band" style="background:#e6194b"><span>Band 0 · y=0</span><span class="right">0</span></div>
+<div class="band" style="background:#3cb44b"><span>Band 1 · y=500</span><span class="right">1</span></div>
+<div class="band" style="background:#4363d8"><span>Band 2 · y=1000</span><span class="right">2</span></div>
+<div class="band" style="background:#f58231"><span>Band 3 · y=1500</span><span class="right">3</span></div>
+<div class="band" style="background:#911eb4"><span>Band 4 · y=2000</span><span class="right">4</span></div>
+<div class="band" style="background:#46f0f0"><span>Band 5 · y=2500</span><span class="right">5</span></div>
+<div class="band" style="background:#f032e6"><span>Band 6 · y=3000</span><span class="right">6</span></div>
+<div class="band" style="background:#bcf60c"><span>Band 7 · y=3500</span><span class="right">7</span></div>
+<div class="band" style="background:#e6194b"><span>Band 8 · y=4000</span><span class="right">8</span></div>
+<div class="band" style="background:#3cb44b"><span>Band 9 · y=4500</span><span class="right">9</span></div>
+<div class="band" style="background:#4363d8"><span>Band 10 · y=5000</span><span class="right">10</span></div>
+<div class="band" style="background:#f58231"><span>Band 11 · y=5500</span><span class="right">11</span></div>
+<div class="band" style="background:#911eb4"><span>Band 12 · y=6000</span><span class="right">12</span></div>
+<div class="band" style="background:#46f0f0"><span>Band 13 · y=6500</span><span class="right">13</span></div>
+<div class="band" style="background:#f032e6"><span>Band 14 · y=7000</span><span class="right">14</span></div>
+<div class="band" style="background:#bcf60c"><span>Band 15 · y=7500</span><span class="right">15</span></div>
+<script>
+  window.__fixture = {
+    name: 'bands',
+    cssHeight: 8000,
+    bandHeight: 500,
+    colors: ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c'],
+  };
+</script>
+</body>
+</html>
