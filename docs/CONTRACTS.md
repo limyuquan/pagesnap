@@ -276,6 +276,8 @@ They're gated on `import.meta.env.MODE === 'e2e'`, and production builds strip t
 `__pagesnap` in `.output/chrome-mv3/background.js`).
 - SW `globalThis.__pagesnap: BackgroundTestHook`:
   - `startCapture(tabId)` calls A's `startCapture(await tabs.get(tabId))`.
+  - `clickAction(tabId)` runs the toolbar button's own `action.onClicked` listener (the path a
+    real click and Alt+Shift+P take): starts a capture, or cancels the running one (`null`).
   - `seedSyntheticSession(opts)` writes a synthetic `ready` session.
 - Editor `window.__pagesnapTest: EditorTestHook`, owned by B:
   - `isReady()`
@@ -314,7 +316,7 @@ values you need for assertions. Bands use the 8-colour cycle `#e6194b #3cb44b #4
   - `seedSyntheticSession` is the quickest way to get a realistic session.
 - **E2E** (`tests/e2e/**/*.spec.ts`, Playwright): import `test`/`expect` from `tests/e2e/fixtures.ts`.
   - Fixtures:
-    - `context`: the extension loaded into bundled Chromium; headless unless `HEADED=1`.
+    - `context`: the extension loaded into bundled Chromium; headless unless `PAGESNAP_HEADED=1` (also with `PAGESNAP_BROWSER=cft`).
     - `serviceWorker`, `extensionId`.
     - `pagesnap`, with helpers:
       - `fixtureUrl(name)`, `openFixture(name)`, `tabIdOf(page)`;
@@ -332,6 +334,14 @@ values you need for assertions. Bands use the 8-colour cycle `#e6194b #3cb44b #4
     manifest uses `<all_urls>`.
   - Pixel assertions: export via `__pagesnapTest.exportPng()` or read slices, decode with `pngjs`,
     and compare colours at known band offsets. Don't compare screenshots.
+  - **Browsers:** bundled Chromium by default; `PAGESNAP_BROWSER=cft` (or `pnpm test:e2e:cft`)
+    runs the same suite in Chrome for Testing from `~/.cache/pagesnap-cft` or `PAGESNAP_CFT_PATH`.
+    Both are headless (new headless mode); a visible window only with `PAGESNAP_HEADED=1`.
+  - **Flow tests** (`flow.*.spec.ts`) use no synthetic sessions: capture through `clickAction`,
+    draw with the mouse, read `⌘C`/`⇧⌘C` back from the clipboard, download, reload, and check
+    the page was restored. `flow.command.spec.ts` presses Alt+Shift+P through CDP `rawKeyDown`
+    (Playwright's `keyboard.press` never reaches Chrome's accelerators). `flow.perf.spec.ts`
+    asserts the performance budgets.
   - **Parallel agents:** run e2e with `PAGESNAP_E2E_ID=a|b|c pnpm test:e2e`. The build goes to
     `.output/chrome-mv3-e2e-<id>` and results to `test-results-<id>/`, so you don't overwrite each
     other. The fixture server on :4321 is shared and reused.
@@ -428,6 +438,21 @@ Log:
   - **Copy/download cancel background prewarms** and re-schedule them, so a user copy never waits
     behind the full-page composite.
 
+- **2026-10-25, Phase 2 (integration), closes the items above:**
+  - `Settings['editor'].defaultColor: Color` (default `DEFAULT_COLOR`). The engine seeds its
+    tool styles from it in `init` (`seedStyles`, highlighter excluded), so there's no red flash;
+    C's `useDefaultColor` hook and the options-page cast are gone.
+  - Badge: graphite `#232327` with white text during capture; red `#FF3B30` with `!` on the
+    captured tab when a capture fails or is cut short (not when the user cancelled) and its editor
+    opened in the background. It clears when the editor tab is activated. If the editor opens in
+    front, the badge just clears.
+  - Notice strip shows the engine's own `warning.message` / `error.message` (partial first, then
+    VISIBLE_ONLY, TRUNCATED, HEIGHT_CHANGED, IMAGES_PENDING), with every notice in its tooltip.
+    `INNER_SCROLLER` is informational: neutral icon, shown once per profile (localStorage
+    `pagesnap:seen-info`), never as a warning.
+  - `BackgroundTestHook.clickAction(tabId)` (e2e only), see §4.10.
+  - Vitest browser project pre-bundles `perfect-freehand` and `idb` (`optimizeDeps.include`).
+
 ## 9. Decisions made in Phase 0
 
 1. **The agent is a WXT unlisted script** (`src/entrypoints/agent.ts` → `/agent.js`), not a
@@ -471,6 +496,8 @@ Log:
   can't side-load through flags anyway. Load `.output/chrome-mv3-dev` unpacked.
 
 ## 10. Phase-0 placeholders to replace
+
+All replaced in Phase 1 (commit a6dbfdd); the table is kept for history.
 
 | File | Owner | State |
 |---|---|---|

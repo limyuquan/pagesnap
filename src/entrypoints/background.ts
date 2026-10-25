@@ -12,6 +12,7 @@ import { captureTestHook } from '@/capture/testHook';
 import { pruneSessions } from '@/shared/db';
 import { getSettings } from '@/shared/settings';
 import { seedSyntheticSession } from '@/shared/testing/synthetic';
+import type { SessionId } from '@/shared/types';
 
 const MENU_CAPTURE = 'capture-full-page';
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -20,10 +21,21 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * User trigger: start a capture, or cancel the running one. A second click within the first
  * moments is treated as a double-click and ignored.
  */
-function trigger(tab: Parameters<typeof startCapture>[0]): void {
-  if (captureJustStarted()) return;
-  if (cancelCapture()) return;
-  startCapture(tab).catch((err: unknown) => console.error('[pagesnap] capture failed', err));
+function trigger(tab: Parameters<typeof startCapture>[0]): Promise<SessionId | null> {
+  if (captureJustStarted()) return Promise.resolve(null);
+  if (cancelCapture()) return Promise.resolve(null);
+  return startCapture(tab).catch((err: unknown) => {
+    console.error('[pagesnap] capture failed', err);
+    return null;
+  });
+}
+
+/**
+ * The toolbar button's listener. The `_execute_action` command (Alt+Shift+P) is dispatched by
+ * Chrome as this same `action.onClicked` event, so both land here. The e2e hook calls it too.
+ */
+function onActionClicked(tab: Parameters<typeof startCapture>[0]): Promise<SessionId | null> {
+  return trigger(tab);
 }
 
 export default defineBackground(() => {
@@ -31,7 +43,7 @@ export default defineBackground(() => {
   void recoverInterrupted().catch(() => {});
 
   // Toolbar click and the `_execute_action` shortcut (Alt+Shift+P) both land here (no popup).
-  browser.action.onClicked.addListener((tab) => trigger(tab));
+  browser.action.onClicked.addListener((tab) => void onActionClicked(tab));
 
   browser.runtime.onInstalled.addListener(() => {
     browser.contextMenus.create({
@@ -43,7 +55,7 @@ export default defineBackground(() => {
 
   browser.contextMenus.onClicked.addListener((info, tab) => {
     if (info.menuItemId !== MENU_CAPTURE || !tab) return;
-    trigger(tab);
+    void trigger(tab);
   });
 
   browser.runtime.onStartup.addListener(() => {
@@ -58,6 +70,7 @@ export default defineBackground(() => {
   if (import.meta.env.MODE === 'e2e') {
     globalThis.__pagesnap = {
       startCapture: async (tabId) => startCapture(await browser.tabs.get(tabId)),
+      clickAction: async (tabId) => onActionClicked(await browser.tabs.get(tabId)),
       seedSyntheticSession,
     };
     globalThis.__pagesnapCapture = captureTestHook;

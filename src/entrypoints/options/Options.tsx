@@ -15,13 +15,6 @@ import {
   watchSettings,
 } from '@/shared/settings';
 
-/**
- * `editor.defaultColor` isn't in the frozen `Settings` type yet (proposed in CONTRACTS §8). Stored
- * values are deep-merged over the defaults, so the extra field round-trips today; the editor
- * applies it through the public `setColor` action.
- */
-type EditorSettings = Settings['editor'] & { defaultColor?: string };
-
 const EDITOR_KEYS: [string, string][] = [
   ['Arrow, Rectangle, Underline', 'A  R  U'],
   ['Highlighter, Pen, Text', 'H  P  T'],
@@ -64,8 +57,7 @@ export function Options() {
     });
   };
 
-  const editor = settings?.editor as EditorSettings | undefined;
-  const color = editor?.defaultColor ?? DEFAULT_COLOR;
+  const color = settings?.editor.defaultColor ?? DEFAULT_COLOR;
 
   return (
     <main className="po-page" data-testid="options-root" aria-busy={!settings}>
@@ -154,14 +146,14 @@ export function Options() {
                       data-color={c}
                       tabIndex={checked ? 0 : -1}
                       style={{ '--sw': c } as React.CSSProperties}
-                      onClick={() => save({ editor: { defaultColor: c } as EditorSettings })}
+                      onClick={() => save({ editor: { defaultColor: c } })}
                       onKeyDown={(e) => {
                         const dir = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
                         if (!dir) return;
                         e.preventDefault();
                         const n = (i + dir + PALETTE.length) % PALETTE.length;
                         const next = PALETTE[n];
-                        if (next) save({ editor: { defaultColor: next } as EditorSettings });
+                        if (next) save({ editor: { defaultColor: next } });
                         const sib = e.currentTarget.parentElement?.children[n];
                         if (sib instanceof HTMLElement) sib.focus();
                       }}

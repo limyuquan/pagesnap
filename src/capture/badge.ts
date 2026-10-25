@@ -1,13 +1,17 @@
 /** Capture progress on the toolbar badge: the only feedback, since nothing is drawn in the page. */
 import { browser } from 'wxt/browser';
 
-const BLUE = '#0A84FF';
+/** The icon's graphite tile, so the progress badge reads as part of the icon. */
+export const BADGE_PROGRESS = '#232327';
+/** Same red as the default ink: something went wrong. */
+export const BADGE_FAILED = '#FF3B30';
+export const BADGE_TEXT = '#FFFFFF';
 
-export async function setBadge(tabId: number, text: string, color = BLUE): Promise<void> {
+export async function setBadge(tabId: number, text: string, color = BADGE_PROGRESS): Promise<void> {
   try {
     await Promise.all([
       browser.action.setBadgeBackgroundColor({ tabId, color }),
-      browser.action.setBadgeTextColor?.({ tabId, color: '#FFFFFF' }),
+      browser.action.setBadgeTextColor?.({ tabId, color: BADGE_TEXT }),
       browser.action.setBadgeText({ tabId, text }),
     ]);
   } catch {
@@ -23,4 +27,9 @@ export function progressText(done: number, total: number): string {
 
 export function clearBadge(tabId: number): Promise<void> {
   return setBadge(tabId, '');
+}
+
+/** A red `!` on the captured tab: the capture failed or stopped early. */
+export function failedBadge(tabId: number): Promise<void> {
+  return setBadge(tabId, '!', BADGE_FAILED);
 }

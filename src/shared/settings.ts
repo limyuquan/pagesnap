@@ -7,6 +7,7 @@
  * docs/CONTRACTS.md.
  */
 import { browser } from 'wxt/browser';
+import { type Color, DEFAULT_COLOR } from './annotations';
 import { AI_MAX_LONG_EDGE_CSS } from './limits';
 import type { CaptureOptions } from './protocol';
 
@@ -36,6 +37,11 @@ export interface Settings {
   editor: {
     /** Contrast shadow on new shapes. */
     shadow: boolean;
+    /**
+     * Starting ink colour (a `PALETTE` hex) for every tool except the highlighter, which keeps
+     * its own yellow. Set on the options page; the editor seeds its tool styles from it.
+     */
+    defaultColor: Color;
   };
   storage: {
     /** Keep at least this many captures. */
@@ -59,6 +65,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   editor: {
     shadow: true,
+    defaultColor: DEFAULT_COLOR,
   },
   storage: {
     keepSessions: 20,

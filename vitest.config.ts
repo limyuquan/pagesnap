@@ -25,6 +25,9 @@ export default defineConfig({
       },
       {
         resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
+        // Pre-bundle up front, so Vite doesn't discover them mid-run and reload the page
+        // (which fails the first browser test with "Vite unexpectedly reloaded a test").
+        optimizeDeps: { include: ['perfect-freehand', 'idb'] },
         test: {
           name: 'browser',
           include: ['tests/browser/**/*.test.ts'],

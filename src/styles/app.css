@@ -514,6 +514,9 @@ a.ps-ident:hover .ps-ident-host {
   height: 14px;
   color: var(--ps-warn);
 }
+.ps-notice[data-tone="info"] .ps-notice-icon {
+  color: var(--ps-ink-3);
+}
 .ps-notice strong {
   color: var(--ps-ink);
   font-weight: 600;

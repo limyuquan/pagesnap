@@ -79,27 +79,57 @@ const meta = (over: Partial<SessionMeta>): SessionMeta => ({
 });
 
 describe('captureNotice', () => {
-  it('prefers partial over other warnings', () => {
+  it('prefers partial over other warnings and uses the engine message', () => {
     const n = captureNotice(
       meta({
         status: 'partial',
-        error: { code: 'ABORTED_BY_USER', message: 'x' },
-        warnings: [{ code: 'TRUNCATED', message: '' }],
+        error: { code: 'TAB_CHANGED', message: 'You switched tabs, so the capture stopped early.' },
+        warnings: [{ code: 'TRUNCATED', message: 'Cut at the limit.' }],
       }),
     );
-    expect(n?.lead).toBe('Partial capture.');
-    expect(n?.text).toBe('You pressed Esc mid-capture. The image stops at 4,200 px.');
+    expect(n).toMatchObject({ tone: 'warn', code: 'PARTIAL', lead: 'Partial capture.' });
+    expect(n?.text).toBe(
+      'You switched tabs, so the capture stopped early. The image stops at 4,200 px.',
+    );
+    expect(n?.all).toEqual([
+      'Partial capture. You switched tabs, so the capture stopped early. The image stops at 4,200 px.',
+      'Cut at the limit.',
+    ]);
   });
 
-  it('explains visible-only and cut-off captures', () => {
-    expect(captureNotice(meta({ mode: 'visible' }))?.lead).toBe('Visible area only.');
-    expect(captureNotice(meta({ warnings: [{ code: 'TRUNCATED', message: '' }] }))?.lead).toBe(
-      'Cut off.',
+  it('shows visible-only, truncated and height-changed messages as written', () => {
+    const vis =
+      'Chrome doesn’t let extensions scroll its own pages, so only the visible area was captured.';
+    expect(
+      captureNotice(meta({ mode: 'visible', warnings: [{ code: 'VISIBLE_ONLY', message: vis }] })),
+    ).toMatchObject({ tone: 'warn', code: 'VISIBLE_ONLY', text: vis });
+    expect(captureNotice(meta({ mode: 'visible' }))?.text).toBe(
+      'Only the visible area was captured.',
     );
+    expect(
+      captureNotice(meta({ warnings: [{ code: 'TRUNCATED', message: 'Stopped at the limit.' }] })),
+    ).toMatchObject({ tone: 'warn', text: 'Stopped at the limit.' });
+    const moved = 'The page changed while it was captured (content loaded or moved).';
+    expect(
+      captureNotice(
+        meta({
+          warnings: [
+            { code: 'INNER_SCROLLER', message: 'panel' },
+            { code: 'HEIGHT_CHANGED', message: moved },
+          ],
+        }),
+      ),
+    ).toMatchObject({ tone: 'warn', code: 'HEIGHT_CHANGED', text: moved, all: [moved, 'panel'] });
+  });
+
+  it('treats an expanded inner scroller as information, shown until seen', () => {
+    const m = meta({ warnings: [{ code: 'INNER_SCROLLER', message: 'Expanded in place.' }] });
+    expect(captureNotice(m)).toMatchObject({ tone: 'info', code: 'INNER_SCROLLER' });
+    expect(captureNotice(m, new Set(['INNER_SCROLLER']))).toBeNull();
   });
 
   it('says nothing for a clean capture', () => {
-    expect(captureNotice(meta({ warnings: [{ code: 'INNER_SCROLLER', message: '' }] }))).toBeNull();
+    expect(captureNotice(meta({}))).toBeNull();
   });
 });
 

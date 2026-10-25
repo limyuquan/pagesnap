@@ -10,6 +10,13 @@ describe('settings', () => {
     });
   });
 
+  it('starts with the red ink colour and keeps a chosen one', async () => {
+    expect(DEFAULT_SETTINGS.editor.defaultColor).toBe('#FF3B30');
+    await updateSettings({ editor: { defaultColor: '#0A84FF' } });
+    const s = await getSettings();
+    expect(s.editor).toEqual({ shadow: true, defaultColor: '#0A84FF' });
+  });
+
   it('persists patches', async () => {
     await updateSettings({ capture: { settleMs: 300 } });
     const s = await getSettings();

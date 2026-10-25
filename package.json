@@ -21,6 +21,7 @@
     "test:unit": "vitest run --project unit",
     "test:browser": "vitest run --project browser",
     "test:e2e": "pnpm build:e2e && playwright test",
+    "test:e2e:cft": "pnpm build:e2e && PAGESNAP_BROWSER=cft playwright test",
     "check": "pnpm typecheck && pnpm lint && pnpm test",
     "postinstall": "wxt prepare"
   },

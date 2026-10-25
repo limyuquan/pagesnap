@@ -26,7 +26,7 @@ test('extension loads with the e2e manifest and test hooks', async ({
   ]);
   expect(info.hostPermissions).toEqual(['<all_urls>']);
   expect(info.popup).toBeNull();
-  expect(info.hooks).toEqual(['seedSyntheticSession', 'startCapture']);
+  expect(info.hooks).toEqual(['clickAction', 'seedSyntheticSession', 'startCapture']);
 });
 
 test('editor renders for a seeded session', async ({ pagesnap }) => {

@@ -254,7 +254,8 @@ test.describe('capture states', () => {
     const notice = page.getByTestId('capture-notice');
     await expect(notice).toBeVisible();
     await expect(notice).toContainText('Partial capture.');
-    await expect(notice).toContainText('The tab changed mid-capture.');
+    await expect(notice).toHaveAttribute('data-tone', 'warn');
+    await expect(notice).toContainText('The tab was switched.');
     await expect(notice).toContainText('4,000 px');
     await notice.getByRole('button', { name: 'Dismiss notice' }).click();
     await expect(notice).toHaveCount(0);
@@ -268,7 +269,9 @@ test.describe('capture states', () => {
     });
     const page = await pagesnap.openEditor(id);
     await waitReady(page, { force: true });
-    await expect(page.getByTestId('capture-notice')).toContainText('Visible area only.');
+    const notice = page.getByTestId('capture-notice');
+    await expect(notice).toHaveAttribute('data-tone', 'warn');
+    await expect(notice).toContainText('restricted');
   });
 
   test('capture error shows a human message and a retry hint', async ({

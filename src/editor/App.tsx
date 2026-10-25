@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { EditorCanvas, useEditorShortcuts, useEditorStore } from '@/editor/engine';
 import { parseEditorHash } from '@/shared/handoff';
-import { getSettings } from '@/shared/settings';
 import { Dock } from './ui/Dock';
 import { CaptureNotice, ErrorState, LoadingState } from './ui/StageStates';
 import { TopBar } from './ui/Toolbar';
@@ -34,7 +33,6 @@ export function App() {
 
   const phase = viewPhase(!!sessionId, load, meta);
   const ready = phase.kind === 'ready';
-  useDefaultColor(ready);
 
   useEffect(() => {
     const t = meta?.title?.trim();
@@ -61,25 +59,4 @@ export function App() {
       <TooltipLayer />
     </div>
   );
-}
-
-/**
- * Applies `settings.editor.defaultColor` (set on the options page) as the starting ink colour,
- * once per editor, through the public `setColor` action. Arrow is the active tool at that point,
- * so this sets the shared ink colour and leaves the highlighter's yellow alone.
- */
-function useDefaultColor(ready: boolean) {
-  useEffect(() => {
-    if (!ready) return;
-    let alive = true;
-    void getSettings().then((s) => {
-      const color = (s.editor as { defaultColor?: string }).defaultColor;
-      const { tool, styles, actions } = useEditorStore.getState();
-      if (!alive || !color || tool === 'select' || tool === 'highlight') return;
-      if (styles[tool].color.toLowerCase() !== color.toLowerCase()) actions.setColor(color);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [ready]);
 }

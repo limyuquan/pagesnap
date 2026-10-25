@@ -17,6 +17,12 @@ export interface BackgroundTestHook {
    * editor tab has been opened.
    */
   startCapture(tabId: number): Promise<SessionId>;
+  /**
+   * Exactly what a toolbar click (or Alt+Shift+P, which Chrome dispatches as the same
+   * `action.onClicked` event) does for `tabId`: start a capture, or cancel the running one.
+   * Resolves with the session id once the editor is open, or `null` if the click cancelled.
+   */
+  clickAction(tabId: number): Promise<SessionId | null>;
   /** Store a synthetic `ready` session (see `shared/testing/synthetic.ts`). */
   seedSyntheticSession(opts?: SyntheticOptions): Promise<SessionId>;
 }

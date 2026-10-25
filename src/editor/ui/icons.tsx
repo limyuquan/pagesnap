@@ -110,6 +110,14 @@ export const NoticeIcon = (p: IconProps) => (
   </Svg>
 );
 
+export const InfoIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="10" cy="10" r="7.25" />
+    <path d="M10 9.25v4.25" />
+    <circle cx="10" cy="6.4" r=".4" fill="currentColor" />
+  </Svg>
+);
+
 export const CloseIcon = (p: IconProps) => (
   <Svg {...p}>
     <path d="m5.5 5.5 9 9M14.5 5.5l-9 9" />

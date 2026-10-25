@@ -5,7 +5,7 @@
  * Voice: plain, specific, short. Say what happened and what to do next. No exclamation marks.
  */
 import type { CopyStatus, DownloadStatus } from '@/editor/engine';
-import type { CaptureErrorCode, CaptureSession } from '@/shared/types';
+import type { CaptureErrorCode, CaptureSession, CaptureWarningCode } from '@/shared/types';
 import { combo } from './keys';
 
 const nf = new Intl.NumberFormat('en-US');
@@ -97,56 +97,82 @@ export function downloadToast(download: DownloadStatus): ToastContent | null {
 // ---------------------------------------------------------------- capture notices
 
 export interface NoticeContent {
-  /** Short bold lead-in. */
-  lead: string;
+  /**
+   * `warn`: the image may be missing or misplacing something (partial, visible-only, cut off,
+   * page changed). `info`: nothing is wrong, the capture just worked differently (a scrolling
+   * panel expanded in place). Info notices are quieter and shown once per profile.
+   */
+  tone: 'warn' | 'info';
+  /** Which warning (or `PARTIAL`) this is; the key for "seen" bookkeeping. */
+  code: CaptureWarningCode | 'PARTIAL' | 'VISIBLE';
+  /** Short bold lead-in, when the text alone doesn't say what kind of notice it is. */
+  lead?: string;
+  /** The capture engine's own sentence (`warning.message` / `error.message`), as written. */
   text: string;
+  /** Every notice for the session, most important first (the strip shows the first; the rest go in its tooltip). */
+  all: string[];
 }
 
-const PARTIAL_REASONS: Partial<Record<CaptureErrorCode, string>> = {
-  TAB_CHANGED: 'The tab changed mid-capture.',
-  ABORTED_BY_USER: 'You pressed Esc mid-capture.',
-  SCROLL_JACKED: 'The page stopped scrolling the way Page Snap expected.',
-  PINCH_ZOOM: 'The page was pinch-zoomed.',
-  SCALE_CHANGED: 'The window moved to a display with a different scale.',
-  CAPTURE_FAILED: 'Chrome stopped returning screenshots.',
-  INTERRUPTED: 'Chrome interrupted the capture.',
+/** Warnings in the order they matter to the user. INNER_SCROLLER is informational only. */
+const WARNING_ORDER: CaptureWarningCode[] = [
+  'VISIBLE_ONLY',
+  'TRUNCATED',
+  'HEIGHT_CHANGED',
+  'IMAGES_PENDING',
+  'INNER_SCROLLER',
+];
+const INFO_CODES: ReadonlySet<CaptureWarningCode> = new Set(['INNER_SCROLLER']);
+
+/** Fallback sentences, only for records without a message. */
+const FALLBACK: Record<CaptureWarningCode, string> = {
+  VISIBLE_ONLY: 'Only the visible area was captured.',
+  TRUNCATED: 'The page is very long, so the capture stops at the length limit.',
+  HEIGHT_CHANGED: 'The page changed while it was captured, so a few parts may be misaligned.',
+  IMAGES_PENDING: 'Some images were still loading when they were captured.',
+  INNER_SCROLLER: 'The page scrolls inside a panel, so that panel was expanded in place.',
 };
 
 type NoticeSession = Pick<CaptureSession, 'status' | 'error' | 'warnings' | 'css' | 'mode'>;
 
-/** The one notice worth showing for a session, or `null`. Partial beats visible-only beats cut-off. */
-export function captureNotice(session: NoticeSession | null): NoticeContent | null {
+/**
+ * The notice worth showing for a session, or `null`. A partial capture beats every warning;
+ * warnings follow `WARNING_ORDER`. `seenInfo` lists info codes the user has already been told
+ * about: those are left out, so an informational line appears once, not on every capture.
+ */
+export function captureNotice(
+  session: NoticeSession | null,
+  seenInfo: ReadonlySet<string> = new Set(),
+): NoticeContent | null {
   if (!session) return null;
-  const has = (code: string) => session.warnings.some((w) => w.code === code);
+  const items: Omit<NoticeContent, 'all'>[] = [];
   if (session.status === 'partial') {
-    const reason =
-      (session.error && PARTIAL_REASONS[session.error.code]) ??
-      session.error?.message ??
-      'The capture stopped early.';
-    return {
+    const reason = session.error?.message?.trim() || 'The capture stopped early.';
+    items.push({
+      tone: 'warn',
+      code: 'PARTIAL',
       lead: 'Partial capture.',
       text: `${reason} The image stops at ${px(session.css.h)}.`,
-    };
+    });
   }
-  if (has('VISIBLE_ONLY') || session.mode === 'visible') {
-    return {
-      lead: 'Visible area only.',
-      text: 'Chrome doesn’t let extensions scroll this page.',
-    };
+  for (const code of WARNING_ORDER) {
+    const w = session.warnings.find((x) => x.code === code);
+    if (!w) continue;
+    if (INFO_CODES.has(code) && seenInfo.has(code)) continue;
+    items.push({
+      tone: INFO_CODES.has(code) ? 'info' : 'warn',
+      code,
+      text: w.message?.trim() || FALLBACK[code],
+    });
   }
-  if (has('TRUNCATED')) {
-    return {
-      lead: 'Cut off.',
-      text: `Very long pages stop at ${px(session.css.h)} so the image stays workable.`,
-    };
+  if (session.mode === 'visible' && !items.some((i) => i.code === 'VISIBLE_ONLY')) {
+    items.push({ tone: 'warn', code: 'VISIBLE', text: FALLBACK.VISIBLE_ONLY });
   }
-  if (has('IMAGES_PENDING')) {
-    return {
-      lead: 'Some images were still loading.',
-      text: 'Scroll through the page once, then capture again if any are blank.',
-    };
-  }
-  return null;
+  const first = items[0];
+  if (!first) return null;
+  return {
+    ...first,
+    all: items.map((i) => (i.lead ? `${i.lead} ${i.text}` : i.text)),
+  };
 }
 
 // ---------------------------------------------------------------- errors

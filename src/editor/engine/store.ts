@@ -279,6 +279,22 @@ export const DEFAULT_STYLES: Readonly<Record<DrawTool, ToolStyle>> = {
   text: { color: DEFAULT_COLOR, size: DEFAULT_SIZES_CSS.text },
 };
 
+/**
+ * Tool styles with the shared ink colour set to `settings.editor.defaultColor` (options page).
+ * The highlighter keeps its own colour. Unknown or malformed values are ignored.
+ */
+export function seedStyles(
+  styles: Readonly<Record<DrawTool, ToolStyle>>,
+  color: string | undefined,
+): Readonly<Record<DrawTool, ToolStyle>> {
+  if (!color || !/^#[0-9a-f]{6}$/i.test(color)) return styles;
+  const next = { ...styles };
+  for (const tool of Object.keys(next) as DrawTool[]) {
+    if (tool !== 'highlight') next[tool] = { ...next[tool], color };
+  }
+  return next;
+}
+
 /** Idle delay before pre-encoding the copy after a commit (03 §4.2). */
 export const PREWARM_DELAY_MS = 400;
 
@@ -630,6 +646,7 @@ export const useEditorStore = create<EditorState>()((set, get) => {
         _settings: settings,
         _fit: true,
         camera,
+        styles: seedStyles(get().styles, settings.editor.defaultColor),
       });
 
       unwatchSettings?.();

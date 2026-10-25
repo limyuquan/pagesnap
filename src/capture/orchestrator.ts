@@ -21,7 +21,7 @@ import type {
   TargetGeometry,
 } from '@/shared/types';
 import { AgentLink, InjectError } from './agentLink';
-import { clearBadge, progressText, setBadge } from './badge';
+import { clearBadge, failedBadge, progressText, setBadge } from './badge';
 import { buildLayout, type ColorRun, colorRuns, scrollerBitmapRect } from './layout';
 import { createShooter, type Shooter } from './limiter';
 import { dataUrlToBlob, pngBlobSize } from './png';
@@ -187,7 +187,7 @@ class CaptureJob {
     const t0 = performance.now();
     await this.save();
     await browser.storage.session.set({ [ACTIVE_CAPTURE_KEY]: this.id });
-    void setBadge(this.tabId, '…');
+    void setBadge(this.tabId, progressText(0, 0));
     this.listen();
     try {
       await this.capture();
@@ -199,8 +199,7 @@ class CaptureJob {
     await this.finalize();
     this.timings.finalizeMs = Math.round(performance.now() - tf);
     await browser.storage.session.remove(ACTIVE_CAPTURE_KEY);
-    void clearBadge(this.tabId);
-    await this.openEditor();
+    await this.finishBadge(await this.openEditor());
     this.timings.totalMs = Math.round(performance.now() - t0);
     this.timings.status = this.session.status;
     this.timings.slices = this.slices.length;
@@ -445,13 +444,13 @@ class CaptureJob {
     };
   }
 
-  private async openEditor(): Promise<void> {
+  private async openEditor(): Promise<Tab | null> {
     const tab = await browser.tabs.get(this.tabId).catch(() => null);
     const url = editorUrl(this.id);
     // Don't steal focus from a tab the user switched to.
     const activeTab = !!tab?.active;
     try {
-      await browser.tabs.create(
+      return await browser.tabs.create(
         tab
           ? {
               url,
@@ -463,8 +462,38 @@ class CaptureJob {
           : { url, windowId: this.windowId, index: this.tabIndex + 1 },
       );
     } catch {
-      await browser.tabs.create({ url });
+      return browser.tabs.create({ url }).catch(() => null);
     }
+  }
+
+  /**
+   * Progress badge off. A failed or cut-short capture (not one the user cancelled) leaves a red
+   * `!` on the captured tab until its editor tab is in front, where the reason is spelled out.
+   */
+  private async finishBadge(editor: Tab | null): Promise<void> {
+    const s = this.session;
+    const failed =
+      s.status === 'error' || (s.status === 'partial' && s.error?.code !== 'ABORTED_BY_USER');
+    if (!failed || editor?.active || editor?.id == null) {
+      await clearBadge(this.tabId);
+      return;
+    }
+    await failedBadge(this.tabId);
+    const tabId = this.tabId;
+    const editorId = editor.id;
+    const done = () => {
+      browser.tabs.onActivated.removeListener(onActivated);
+      browser.tabs.onRemoved.removeListener(onRemoved);
+      void clearBadge(tabId);
+    };
+    const onActivated = (info: { tabId: number }) => {
+      if (info.tabId === editorId) done();
+    };
+    const onRemoved = (id: number) => {
+      if (id === editorId || id === tabId) done();
+    };
+    browser.tabs.onActivated.addListener(onActivated);
+    browser.tabs.onRemoved.addListener(onRemoved);
   }
 
   private async save(): Promise<void> {

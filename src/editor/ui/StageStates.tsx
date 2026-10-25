@@ -4,7 +4,7 @@
  */
 import { useEffect, useState } from 'react';
 import { browser } from 'wxt/browser';
-import { CloseIcon, NoticeIcon } from './icons';
+import { CloseIcon, InfoIcon, NoticeIcon } from './icons';
 import { prettyCommandShortcut } from './keys';
 import { captureNotice, errorContent } from './messages';
 import type { SessionMeta } from './useSessionMeta';
@@ -100,15 +100,58 @@ export function ErrorState({
 
 // ---------------------------------------------------------------- notice
 
+const SEEN_INFO_KEY = 'pagesnap:seen-info';
+
+function readSeenInfo(): Set<string> {
+  try {
+    const v = JSON.parse(localStorage.getItem(SEEN_INFO_KEY) ?? '[]');
+    return new Set(Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function markInfoSeen(code: string): void {
+  try {
+    const seen = readSeenInfo();
+    if (seen.has(code)) return;
+    seen.add(code);
+    localStorage.setItem(SEEN_INFO_KEY, JSON.stringify([...seen]));
+  } catch {
+    // Storage unavailable: the info line just shows again next time.
+  }
+}
+
+/**
+ * The quiet strip under the top bar. Warnings (partial, visible-only, cut off, page changed) use
+ * the warning icon and show on every capture that has them. Informational lines (a scrolling
+ * panel was expanded in place) use a neutral icon and show once per profile: the capture is
+ * fine, the user only needs to hear how it works the first time.
+ */
 export function CaptureNotice({ meta }: { meta: SessionMeta | null | undefined }) {
   const [dismissed, setDismissed] = useState(false);
-  const notice = meta && meta.status !== 'capturing' ? captureNotice(meta) : null;
+  // Read once per editor, so marking an info line as seen doesn't hide it right away.
+  const [seenInfo] = useState(readSeenInfo);
+  const notice = meta && meta.status !== 'capturing' ? captureNotice(meta, seenInfo) : null;
+  const infoCode = notice?.tone === 'info' ? notice.code : null;
+  useEffect(() => {
+    if (infoCode) markInfoSeen(infoCode);
+  }, [infoCode]);
   if (!notice || dismissed) return <div />;
+  const Icon = notice.tone === 'info' ? InfoIcon : NoticeIcon;
   return (
-    <div className="ps-notice" role="note" data-testid="capture-notice">
-      <NoticeIcon className="ps-notice-icon" />
+    <div
+      className="ps-notice"
+      role="note"
+      data-testid="capture-notice"
+      data-tone={notice.tone}
+      data-code={notice.code}
+      title={notice.all.join('\n')}
+    >
+      <Icon className="ps-notice-icon" />
       <p className="ps-notice-text m-0">
-        <strong>{notice.lead}</strong> {notice.text}
+        {notice.lead && <strong>{notice.lead} </strong>}
+        {notice.text}
       </p>
       <button
         type="button"

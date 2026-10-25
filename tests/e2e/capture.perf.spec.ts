@@ -32,8 +32,8 @@ for (const fixture of ['bands', 'inner-scroller', 'lazy-images']) {
       `[perf ${fixture}] capture ${JSON.stringify({ total: timings?.totalMs, slices: timings?.slices, prepare: timings?.prepareMs })} editor ${JSON.stringify(marks)}`,
     );
     expect(marks.firstTile).not.toBeNull();
-    // Target is < 300 ms (measured ~130–280 ms); the guard is looser so parallel e2e runs on a
-    // busy machine don't flake.
-    expect(marks.firstTile ?? Number.POSITIVE_INFINITY).toBeLessThan(500);
+    // Target is < 300 ms (measured ~110–300 ms alone, up to ~450 ms with six test browsers
+    // running in parallel). Same guard as BUDGET.firstTileMs in flow.perf.spec.ts.
+    expect(marks.firstTile ?? Number.POSITIVE_INFINITY).toBeLessThan(750);
   });
 }
