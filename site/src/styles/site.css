@@ -677,8 +677,7 @@ code {
 .size-scale {
   position: relative;
   width: 140px;
-  /* Same height as the column (the caption below it isn't part of the scale). */
-  margin-bottom: 36px;
+  /* Same height as the column. */
 }
 .br {
   position: absolute;

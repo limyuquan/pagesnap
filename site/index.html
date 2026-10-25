@@ -75,7 +75,6 @@
     <main>
       <section class="hero wrap" aria-labelledby="hero-title">
         <div class="hero-head">
-          <p class="eyebrow">A Chrome extension, free and open source</p>
           <h1 id="hero-title">Show the AI <span class="mark-u">exactly</span> what you mean.</h1>
         </div>
         <div class="hero-side">
@@ -172,13 +171,11 @@
                 <div class="seam-dup"><img src="/demo/fernhill-seam.webp" alt="" loading="lazy" decoding="async" /></div>
                 <i class="seam-mark"></i>
               </div>
-              <figcaption>Screenshots glued together: the bar is back on every screen</figcaption>
             </figure>
             <figure>
               <div class="seam">
                 <img src="/demo/fernhill-seam.webp" alt="" loading="lazy" decoding="async" />
               </div>
-              <figcaption class="stitch-ours">Page Snap: the page as it really is</figcaption>
             </figure>
           </div>
         </section>
@@ -195,7 +192,6 @@
             <div class="stage-shot">
               <canvas aria-label="Marks being drawn on a page: an arrow, a box, an underline, a highlight, a circle and a note" role="img"></canvas>
             </div>
-            <p class="tool-now" aria-hidden="true"><kbd data-key>A</kbd><span data-name>Arrow</span></p>
           </div>
         </section>
 
@@ -207,10 +203,6 @@
               it copies up to 2,576 px around your marks, so
               <span class="mark-hl">nothing gets shrunk into a blur.</span>
             </p>
-            <p class="fine">
-              <kbd>⇧⌘C</kbd> copies the whole page. Download always saves all of it at full
-              resolution.
-            </p>
           </div>
           <div class="visual size" data-visual="size" aria-hidden="true">
             <figure class="size-fig">
@@ -220,10 +212,9 @@
                 <i class="dot"></i>
                 <i class="dot"></i>
               </div>
-              <figcaption class="tnum">A 3,338 px page</figcaption>
             </figure>
             <div class="size-scale">
-              <span class="br br-win"><b class="tnum">2,576 px</b><span>the most <kbd>⌘C</kbd> sends</span></span>
+              <span class="br br-win"><b class="tnum">2,576 px</b></span>
             </div>
           </div>
         </section>
@@ -268,41 +259,28 @@
       </div>
 
       <section class="install wrap" id="install" aria-labelledby="install-title">
-        <h2 id="install-title">Install it from source.</h2>
-        <p class="sub">
-          Page Snap isn’t on the Chrome Web Store yet. Building it takes a minute and needs
-          <a href="https://nodejs.org">Node.js</a> 22 or newer.
-        </p>
+        <h2 id="install-title">Install it.</h2>
         <ol class="steps">
           <li>
-            <h3>Build</h3>
-            <div>
-              <div class="code">
-                <pre><code id="cmd-build">git clone \
-  https://github.com/limyuquan/pagesnap.git
-cd pagesnap
-corepack enable
-pnpm install &amp;&amp; pnpm build</code></pre>
-                <button type="button" class="copy-btn" data-copy="cmd-build" aria-label="Copy the build commands">
-                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6.75" y="6.75" width="9.5" height="9.5" rx="2"/><path d="M13.25 6.75v-1.5a2 2 0 0 0-2-2h-6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h1.5"/></svg>
-                </button>
-              </div>
-            </div>
+            <h3>Download</h3>
+            <p>
+              Get the <code>.zip</code> from the
+              <a href="https://github.com/limyuquan/pagesnap/releases/latest">latest release</a> and
+              unzip it somewhere it can stay.
+            </p>
           </li>
           <li>
             <h3>Load</h3>
             <p>
               Open <code>chrome://extensions</code>, turn on Developer mode, click Load unpacked and
-              choose <code>pagesnap/.output/chrome-mv3</code>. On a Mac, <kbd>⌘⇧.</kbd> shows the
-              hidden <code>.output</code> folder in the file picker.
+              choose the unzipped folder.
             </p>
           </li>
           <li>
             <h3>Pin</h3>
             <p>
               Pin Page Snap to the toolbar. Click it on any page, or press <kbd>Alt</kbd>
-              <kbd>Shift</kbd> <kbd>P</kbd>. To update later, run <code>git pull &amp;&amp; pnpm build</code>
-              and click reload on its card.
+              <kbd>Shift</kbd> <kbd>P</kbd>.
             </p>
           </li>
         </ol>
