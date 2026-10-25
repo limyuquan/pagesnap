@@ -14,6 +14,7 @@ import {
   hitTestShapes,
   imageToScreen,
   pointInRect,
+  ROTATE_HANDLE_CSS,
   resizeBox,
   SCROLL_PAD_CSS,
   screenToImage,
@@ -290,13 +291,24 @@ describe('shapeBounds', () => {
     });
   });
 
-  it('highlight: a slanted band is inflated by half the thickness', () => {
-    expect(shapeBounds(highlight({ x: 10, y: 50 }, { x: 110, y: 90 }), 2)).toEqual({
-      x: -12,
-      y: 28,
-      w: 144,
-      h: 84,
+  it("highlight: a slanted band is bounded by its butt-capped band's four corners", () => {
+    const a = { x: 10, y: 50 };
+    const b = { x: 110, y: 90 };
+    const len = Math.hypot(100, 40);
+    const nx = (-40 / len) * 22;
+    const ny = (100 / len) * 22;
+    const xs = [a.x + nx, a.x - nx, b.x + nx, b.x - nx];
+    const ys = [a.y + ny, a.y - ny, b.y + ny, b.y - ny];
+    expectRectClose(shapeBounds(highlight(a, b), 2), {
+      x: Math.min(...xs),
+      y: Math.min(...ys),
+      w: Math.max(...xs) - Math.min(...xs),
+      h: Math.max(...ys) - Math.min(...ys),
     });
+    // Tighter than the old "inflate by half the thickness", but still contains both endpoints.
+    const r = shapeBounds(highlight(a, b), 2);
+    expect(pointInRect(a, r)).toBe(true);
+    expect(pointInRect(b, r)).toBe(true);
   });
 
   it('pen: points inflated by half the size + 1', () => {
@@ -481,56 +493,88 @@ describe('hitTestShapes', () => {
 // ------------------------------------------------------------------------------- handles
 
 describe('shapeHandles / hitHandle', () => {
-  it('rect has 8 box handles at corners and edge midpoints', () => {
+  beforeEach(() => setTextMeasurer(fakeMeasurer));
+  afterEach(() => setTextMeasurer(null));
+
+  it('rect has 8 box handles on its outer frame, plus the rotation handle', () => {
+    // Frame = the box inflated by half the stroke (10): 95..305 × 95..205.
     const hs = shapeHandles(rect({ x: 100, y: 100, w: 200, h: 100 }));
     expect(hs).toEqual([
-      { id: 'nw', x: 100, y: 100 },
-      { id: 'n', x: 200, y: 100 },
-      { id: 'ne', x: 300, y: 100 },
-      { id: 'e', x: 300, y: 150 },
-      { id: 'se', x: 300, y: 200 },
-      { id: 's', x: 200, y: 200 },
-      { id: 'sw', x: 100, y: 200 },
-      { id: 'w', x: 100, y: 150 },
+      { id: 'nw', x: 95, y: 95 },
+      { id: 'n', x: 200, y: 95 },
+      { id: 'ne', x: 305, y: 95 },
+      { id: 'e', x: 305, y: 150 },
+      { id: 'se', x: 305, y: 205 },
+      { id: 's', x: 200, y: 205 },
+      { id: 'sw', x: 95, y: 205 },
+      { id: 'w', x: 95, y: 150 },
+      // ROTATE_HANDLE_CSS / zoom above the frame's top edge.
+      { id: 'rot', x: 200, y: 95 - ROTATE_HANDLE_CSS },
     ]);
   });
 
-  it('line-like shapes have endpoint handles', () => {
+  it('underline and highlight have endpoint handles; arrows add the bend handle', () => {
     const a = { x: 1, y: 2 };
     const b = { x: 30, y: 40 };
-    for (const s of [arrow(a, b), underline(a, b), highlight(a, b)]) {
+    for (const s of [underline(a, b), highlight(a, b)]) {
       expect(shapeHandles(s)).toEqual([
         { id: 'a', ...a },
         { id: 'b', ...b },
       ]);
     }
+    expect(shapeHandles(arrow(a, b))).toEqual([
+      { id: 'a', ...a },
+      { id: 'b', ...b },
+      { id: 'mid', x: 15.5, y: 21 },
+    ]);
   });
 
-  it('pen and text have none', () => {
-    expect(shapeHandles(pen([[0, 0, 0.5]]))).toEqual([]);
-    expect(shapeHandles(text({ x: 0, y: 0 }, 'x'))).toEqual([]);
+  it('pen has 4 corner handles + rot on its frame; text has corners, e, w + rot', () => {
+    const p = pen([
+      [0, 0, 0.5],
+      [100, 50, 0.5],
+    ]); // frame = points bounds inflated by size/2 = 6
+    expect(shapeHandles(p).map((h) => h.id)).toEqual(['nw', 'ne', 'se', 'sw', 'rot']);
+    expect(shapeHandles(p)[0]).toEqual({ id: 'nw', x: -6, y: -6 });
+    expect(shapeHandles(p)[2]).toEqual({ id: 'se', x: 106, y: 56 });
+    const t = text({ x: 0, y: 0 }, 'x');
+    expect(shapeHandles(t).map((h) => h.id)).toEqual(['nw', 'ne', 'se', 'sw', 'e', 'w', 'rot']);
   });
 
   it('hitHandle finds the nearest handle within tolerance', () => {
     const s = rect({ x: 100, y: 100, w: 200, h: 100 });
-    expect(hitHandle(s, { x: 103, y: 98 }, 8)).toBe('nw');
-    expect(hitHandle(s, { x: 301, y: 151 }, 8)).toBe('e');
+    expect(hitHandle(s, { x: 98, y: 93 }, 8)).toBe('nw');
+    expect(hitHandle(s, { x: 306, y: 151 }, 8)).toBe('e');
     expect(hitHandle(s, { x: 200, y: 150 }, 8)).toBeNull();
     expect(hitHandle(s, { x: 110, y: 100 }, 8)).toBeNull();
+    expect(hitHandle(s, { x: 201, y: 95 - ROTATE_HANDLE_CSS }, 8)).toBe('rot');
   });
 
   it('hitHandle prefers the nearer of two candidates', () => {
-    const s = rect({ x: 0, y: 0, w: 10, h: 10 }); // handles 5 px apart
-    expect(hitHandle(s, { x: 1, y: 0 }, 8)).toBe('nw');
-    expect(hitHandle(s, { x: 4, y: 0 }, 8)).toBe('n');
-    expect(hitHandle(s, { x: 9, y: 1 }, 8)).toBe('ne');
+    // Frame -1..11 (stroke 2): handles 6 image px apart; at zoom 4 the 48-CSS-px sides show
+    // their side handles.
+    const s = rect({ x: 0, y: 0, w: 10, h: 10 }, { width: 2 });
+    expect(hitHandle(s, { x: 0, y: -1 }, 8, 4)).toBe('nw');
+    expect(hitHandle(s, { x: 4, y: -1 }, 8, 4)).toBe('n');
+    expect(hitHandle(s, { x: 10, y: 0 }, 8, 4)).toBe('ne');
   });
 
-  it('hitHandle on an arrow returns the endpoint', () => {
+  it('hitHandle skips side handles that would crowd a small frame', () => {
+    const s = rect({ x: 0, y: 0, w: 10, h: 10 }, { width: 2 }); // 12 CSS px sides at zoom 1
+    expect(hitHandle(s, { x: 4, y: -1 }, 8)).toBe('nw');
+    expect(hitHandle(s, { x: 11, y: 5 }, 8)).not.toBe('e');
+  });
+
+  it('hitHandle on an arrow returns the endpoint, or the bend handle mid-chord', () => {
     const s = arrow({ x: 0, y: 0 }, { x: 100, y: 0 });
     expect(hitHandle(s, { x: 98, y: 2 }, 6)).toBe('b');
     expect(hitHandle(s, { x: 2, y: -2 }, 6)).toBe('a');
-    expect(hitHandle(s, { x: 50, y: 0 }, 6)).toBeNull();
+    expect(hitHandle(s, { x: 50, y: 0 }, 6)).toBe('mid');
+    expect(hitHandle(s, { x: 25, y: 0 }, 6)).toBeNull();
+    // A short arrow (< 48 CSS px on screen) shows no bend handle.
+    const short = arrow({ x: 0, y: 0 }, { x: 40, y: 0 });
+    expect(hitHandle(short, { x: 20, y: 0 }, 6)).toBeNull();
+    expect(hitHandle(short, { x: 20, y: 0 }, 6, 2)).toBe('mid');
   });
 });
 
@@ -538,153 +582,260 @@ describe('resizeBox', () => {
   const box = { x: 100, y: 100, w: 200, h: 100 }; // 100..300 × 100..200
 
   it('moves the dragged corner or edge', () => {
-    expect(resizeBox(box, 'nw', { x: 50, y: 60 }, false)).toEqual({ x: 50, y: 60, w: 250, h: 140 });
-    expect(resizeBox(box, 'n', { x: 999, y: 80 }, false)).toEqual({
+    expect(resizeBox(box, 'nw', { x: 50, y: 60 })).toEqual({ x: 50, y: 60, w: 250, h: 140 });
+    expect(resizeBox(box, 'n', { x: 999, y: 80 })).toEqual({
       x: 100,
       y: 80,
       w: 200,
       h: 120,
     });
-    expect(resizeBox(box, 'ne', { x: 350, y: 50 }, false)).toEqual({
+    expect(resizeBox(box, 'ne', { x: 350, y: 50 })).toEqual({
       x: 100,
       y: 50,
       w: 250,
       h: 150,
     });
-    expect(resizeBox(box, 'e', { x: 400, y: -5 }, false)).toEqual({
+    expect(resizeBox(box, 'e', { x: 400, y: -5 })).toEqual({
       x: 100,
       y: 100,
       w: 300,
       h: 100,
     });
-    expect(resizeBox(box, 'se', { x: 320, y: 230 }, false)).toEqual({
+    expect(resizeBox(box, 'se', { x: 320, y: 230 })).toEqual({
       x: 100,
       y: 100,
       w: 220,
       h: 130,
     });
-    expect(resizeBox(box, 's', { x: 0, y: 250 }, false)).toEqual({
+    expect(resizeBox(box, 's', { x: 0, y: 250 })).toEqual({
       x: 100,
       y: 100,
       w: 200,
       h: 150,
     });
-    expect(resizeBox(box, 'sw', { x: 80, y: 220 }, false)).toEqual({
+    expect(resizeBox(box, 'sw', { x: 80, y: 220 })).toEqual({
       x: 80,
       y: 100,
       w: 220,
       h: 120,
     });
-    expect(resizeBox(box, 'w', { x: 90, y: 0 }, false)).toEqual({ x: 90, y: 100, w: 210, h: 100 });
+    expect(resizeBox(box, 'w', { x: 90, y: 0 })).toEqual({ x: 90, y: 100, w: 210, h: 100 });
   });
 
   it('normalises when dragged past the opposite edge', () => {
-    expect(resizeBox(box, 'e', { x: 40, y: 0 }, false)).toEqual({ x: 40, y: 100, w: 60, h: 100 });
-    expect(resizeBox(box, 'n', { x: 0, y: 260 }, false)).toEqual({ x: 100, y: 200, w: 200, h: 60 });
-    expect(resizeBox(box, 'nw', { x: 400, y: 300 }, false)).toEqual({
+    expect(resizeBox(box, 'e', { x: 40, y: 0 })).toEqual({ x: 40, y: 100, w: 60, h: 100 });
+    expect(resizeBox(box, 'n', { x: 0, y: 260 })).toEqual({ x: 100, y: 200, w: 200, h: 60 });
+    expect(resizeBox(box, 'nw', { x: 400, y: 300 })).toEqual({
       x: 300,
       y: 200,
       w: 100,
       h: 100,
     });
-    const r = resizeBox(box, 'se', { x: 0, y: 0 }, false);
+    const r = resizeBox(box, 'se', { x: 0, y: 0 });
     expect(r).toEqual({ x: 0, y: 0, w: 100, h: 100 });
     expect(r.w).toBeGreaterThanOrEqual(0);
     expect(r.h).toBeGreaterThanOrEqual(0);
   });
 
-  it('keeps corners square with shift, anchored at the opposite corner', () => {
-    expect(resizeBox(box, 'se', { x: 400, y: 150 }, true)).toEqual({
+  it('keeps the aspect ratio on corners, anchored at the opposite corner', () => {
+    const aspect = { aspect: true };
+    // 2:1 box; the larger relative pull wins.
+    expect(resizeBox(box, 'se', { x: 400, y: 150 }, aspect)).toEqual({
       x: 100,
       y: 100,
       w: 300,
-      h: 300,
+      h: 150,
     });
-    expect(resizeBox(box, 'nw', { x: 250, y: 100 }, true)).toEqual({
+    expect(resizeBox(box, 'nw', { x: 250, y: 150 }, aspect)).toEqual({
       x: 200,
-      y: 100,
+      y: 150,
       w: 100,
+      h: 50,
+    });
+    expect(resizeBox(box, 'ne', { x: 320, y: 0 }, aspect)).toEqual({
+      x: 100,
+      y: 0,
+      w: 400,
+      h: 200,
+    });
+    expect(resizeBox(box, 'sw', { x: 0, y: 220 }, aspect)).toEqual({
+      x: 0,
+      y: 100,
+      w: 300,
+      h: 150,
+    });
+  });
+
+  it('aspect still normalises past the anchor', () => {
+    expect(resizeBox(box, 'se', { x: 50, y: 80 }, { aspect: true })).toEqual({
+      x: 50,
+      y: 75,
+      w: 50,
+      h: 25,
+    });
+  });
+
+  it('aspect on edge handles scales the other side about the centre line', () => {
+    expect(resizeBox(box, 'e', { x: 400, y: 0 }, { aspect: true })).toEqual({
+      x: 100,
+      y: 75,
+      w: 300,
+      h: 150,
+    });
+    expect(resizeBox(box, 's', { x: 0, y: 250 }, { aspect: true })).toEqual({
+      x: 50,
+      y: 100,
+      w: 300,
+      h: 150,
+    });
+  });
+
+  it('center resizes symmetrically about the box centre', () => {
+    expect(resizeBox(box, 'se', { x: 320, y: 230 }, { center: true })).toEqual({
+      x: 80,
+      y: 70,
+      w: 240,
+      h: 160,
+    });
+    expect(resizeBox(box, 'e', { x: 350, y: 0 }, { center: true })).toEqual({
+      x: 50,
+      y: 100,
+      w: 300,
       h: 100,
     });
-    expect(resizeBox(box, 'ne', { x: 320, y: 0 }, true)).toEqual({
-      x: 100,
-      y: -20,
-      w: 220,
-      h: 220,
+    expect(resizeBox(box, 'se', { x: 400, y: 150 }, { aspect: true, center: true })).toEqual({
+      x: 0,
+      y: 50,
+      w: 400,
+      h: 200,
     });
-    expect(resizeBox(box, 'sw', { x: 0, y: 220 }, true)).toEqual({ x: 0, y: 100, w: 300, h: 300 });
   });
 
-  it('square with shift still normalises past the anchor', () => {
-    expect(resizeBox(box, 'se', { x: 50, y: 80 }, true)).toEqual({ x: 50, y: 50, w: 50, h: 50 });
-  });
-
-  it('ignores shift on edge handles', () => {
-    expect(resizeBox(box, 'e', { x: 400, y: 0 }, true)).toEqual({ x: 100, y: 100, w: 300, h: 100 });
+  it('no options behaves like an empty options object', () => {
+    expect(resizeBox(box, 'se', { x: 320, y: 230 }, {})).toEqual(
+      resizeBox(box, 'se', { x: 320, y: 230 }),
+    );
   });
 });
 
 describe('dragHandle', () => {
   it('arrow: moves the endpoint freely without shift', () => {
     const s = arrow({ x: 0, y: 0 }, { x: 100, y: 0 });
-    const r = dragHandle(s, 'b', { x: 100, y: 90 }, false) as ArrowShape;
+    const r = dragHandle(s, 'b', { x: 100, y: 90 }) as ArrowShape;
     expect(r.b).toEqual({ x: 100, y: 90 });
     expect(r.a).toEqual(s.a);
   });
 
-  it('arrow: shift snaps to 45° around the other end', () => {
+  it('arrow: shift snaps to 15° around the other end', () => {
     const s = arrow({ x: 0, y: 0 }, { x: 100, y: 0 });
-    const r = dragHandle(s, 'b', { x: 100, y: 90 }, true) as ArrowShape;
-    expect(r.b.x).toBeCloseTo(r.b.y, 5);
+    const r = dragHandle(s, 'b', { x: 100, y: 90 }, { shift: true }) as ArrowShape; // ~42°
+    expect(r.b.x).toBeCloseTo(r.b.y, 5); // 45°
     expect(dist(r.a, r.b)).toBeCloseTo(Math.hypot(100, 90), 5);
 
-    const r2 = dragHandle(s, 'a', { x: 10, y: 5 }, true) as ArrowShape;
+    const r15 = dragHandle(s, 'b', { x: 100, y: 30 }, { shift: true }) as ArrowShape; // ~16.7°
+    expect((Math.atan2(r15.b.y, r15.b.x) * 180) / Math.PI).toBeCloseTo(15, 6);
+    expect(dist(r15.a, r15.b)).toBeCloseTo(Math.hypot(100, 30), 5);
+
+    const r2 = dragHandle(s, 'a', { x: 10, y: 5 }, { shift: true }) as ArrowShape;
     expect(r2.a.y).toBe(0); // horizontal relative to b
     expect(r2.b).toEqual(s.b);
   });
 
-  it('underline: stays horizontal (and pixel-rounded) unless shift', () => {
+  it('arrow: without shift soft-snaps to the axes within 2°', () => {
+    const s = arrow({ x: 0, y: 0 }, { x: 100, y: 0 });
+    const r = dragHandle(s, 'b', { x: 200, y: 5 }) as ArrowShape; // ~1.4°
+    expect(r.b.y).toBe(0);
+    expect(r.b.x).toBeCloseTo(Math.hypot(200, 5), 5);
+    const v = dragHandle(s, 'b', { x: 3, y: 150 }) as ArrowShape; // ~1.1° off vertical
+    expect(v.b.x).toBe(0);
+    const free = dragHandle(s, 'b', { x: 200, y: 12 }) as ArrowShape; // ~3.4°
+    expect(free.b).toEqual({ x: 200, y: 12 });
+  });
+
+  it('arrow: endpoint drags keep the bend', () => {
+    const s = arrow({ x: 0, y: 0 }, { x: 100, y: 0 }, { bend: 40 });
+    expect((dragHandle(s, 'b', { x: 150, y: 70 }) as ArrowShape).bend).toBe(40);
+  });
+
+  it('underline: free and pixel-rounded; soft-snaps near horizontal; shift snaps to 15°', () => {
     const s = underline({ x: 0, y: 50 }, { x: 100, y: 50 });
-    const r = dragHandle(s, 'b', { x: 150.4, y: 80.6 }, false) as UnderlineShape;
-    expect(r.b).toEqual({ x: 150, y: 50 });
-    const r2 = dragHandle(s, 'a', { x: -20.6, y: 10 }, false) as UnderlineShape;
+    // ~11.5°: no longer locked horizontal.
+    const r = dragHandle(s, 'b', { x: 150.4, y: 80.6 }) as UnderlineShape;
+    expect(r.b).toEqual({ x: 150, y: 81 });
+    // ~0.8° off horizontal: soft-snaps flat (and rounds).
+    const flat = dragHandle(s, 'b', { x: 150.4, y: 52 }) as UnderlineShape;
+    expect(flat.b).toEqual({ x: 150, y: 50 });
+    const r2 = dragHandle(s, 'a', { x: -20.6, y: 49 }) as UnderlineShape;
     expect(r2.a).toEqual({ x: -21, y: 50 });
-    const r3 = dragHandle(s, 'b', { x: 150.4, y: 80.6 }, true) as UnderlineShape;
-    expect(r3.b).toEqual({ x: 150, y: 81 });
+    // Shift: 15° steps, then rounded.
+    const r3 = dragHandle(s, 'b', { x: 150.4, y: 80.6 }, { shift: true }) as UnderlineShape;
+    const len = Math.hypot(150.4, 30.6);
+    const ang = (15 * Math.PI) / 180;
+    expect(r3.b).toEqual({
+      x: Math.round(len * Math.cos(ang)),
+      y: Math.round(50 + len * Math.sin(ang)),
+    });
   });
 
   it('underline: a slanted one stays free', () => {
     const s = underline({ x: 0, y: 50 }, { x: 100, y: 80 });
-    const r = dragHandle(s, 'b', { x: 120, y: 90 }, false) as UnderlineShape;
+    const r = dragHandle(s, 'b', { x: 120, y: 90 }) as UnderlineShape;
     expect(r.b).toEqual({ x: 120, y: 90 });
   });
 
-  it('highlight: horizontal lock, not rounded', () => {
+  it('highlight: free endpoints, not rounded, soft-snap near horizontal', () => {
     const s = highlight({ x: 0, y: 50 }, { x: 100, y: 50 });
-    const r = dragHandle(s, 'b', { x: 150.5, y: 70 }, false) as HighlightShape;
-    expect(r.b).toEqual({ x: 150.5, y: 50 });
+    const r = dragHandle(s, 'b', { x: 150.5, y: 70 }) as HighlightShape;
+    expect(r.b).toEqual({ x: 150.5, y: 70 });
+    const flat = dragHandle(s, 'b', { x: 150.5, y: 51 }) as HighlightShape;
+    expect(flat.b.y).toBe(50);
+    expect(flat.b.x).toBeCloseTo(Math.hypot(150.5, 1), 5);
+    expect(Number.isInteger(flat.b.x)).toBe(false);
   });
 
   it('rect: box handles resize, endpoint ids are ignored', () => {
     const s = rect({ x: 100, y: 100, w: 200, h: 100 });
-    const r = dragHandle(s, 'se', { x: 320, y: 230 }, false) as RectShape;
-    expect(r.box).toEqual({ x: 100, y: 100, w: 220, h: 130 });
+    // The handle drags the outer frame edge; the box ends up half a stroke (5) inside it.
+    const r = dragHandle(s, 'se', { x: 320, y: 230 }) as RectShape;
+    expect(r.box).toEqual({ x: 100, y: 100, w: 215, h: 125 });
     expect(r.id).toBe(s.id);
-    expect(dragHandle(s, 'a', { x: 0, y: 0 }, false)).toBe(s);
+    expect(dragHandle(s, 'a', { x: 0, y: 0 })).toBe(s);
+    expect(dragHandle(s, 'mid', { x: 0, y: 0 })).toBe(s);
   });
 
-  it('pen and text are returned unchanged', () => {
-    const p = pen([[0, 0, 0.5]]);
+  it('pen and text ignore handles they do not have', () => {
+    const p = pen([
+      [0, 0, 0.5],
+      [10, 10, 0.5],
+    ]);
     const t = text({ x: 0, y: 0 }, 'x');
-    expect(dragHandle(p, 'a', { x: 5, y: 5 }, false)).toBe(p);
-    expect(dragHandle(t, 'nw', { x: 5, y: 5 }, false)).toBe(t);
+    expect(dragHandle(p, 'a', { x: 5, y: 5 })).toBe(p);
+    expect(dragHandle(p, 'e', { x: 50, y: 5 })).toBe(p); // pens only scale from corners
+    expect(dragHandle(t, 'b', { x: 5, y: 5 })).toBe(t);
+    expect(dragHandle(t, 'n', { x: 5, y: -50 })).toBe(t); // text has no n/s handles
   });
 
   it('does not mutate the input shape', () => {
-    const s = arrow({ x: 0, y: 0 }, { x: 100, y: 0 });
-    const snap = structuredClone(s);
-    dragHandle(s, 'b', { x: 50, y: 50 }, true);
-    expect(s).toEqual(snap);
+    for (const s of [
+      arrow({ x: 0, y: 0 }, { x: 100, y: 0 }),
+      rect({ x: 0, y: 0, w: 50, h: 50 }, { rotation: 0.3 }),
+      text({ x: 0, y: 0 }, 'hi'),
+      pen([
+        [0, 0, 0.5],
+        [10, 10, 0.5],
+      ]),
+    ]) {
+      const snap = structuredClone(s);
+      const h = s.kind === 'arrow' ? 'b' : 'se';
+      dragHandle(s, h, { x: 50, y: 70 }, { shift: true });
+      dragHandle(
+        s,
+        s.kind === 'arrow' ? 'mid' : 'rot',
+        { x: 50, y: 70 },
+        { start: { x: 0, y: 0 } },
+      );
+      expect(s).toEqual(snap);
+    }
   });
 });
 

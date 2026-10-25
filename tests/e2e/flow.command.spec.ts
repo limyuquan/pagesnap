@@ -3,8 +3,8 @@
  * that Chrome treats as page input only, so the extension command never fires (measured). A raw
  * CDP `Input.dispatchKeyEvent` of type `rawKeyDown` goes through the browser's own accelerator
  * handling instead, which is where extension commands live: Chrome then dispatches
- * `_execute_action` as `action.onClicked`, exactly like a real key press. On macOS the event
- * needs the native key code too.
+ * `_execute_action`, which opens the action popup exactly like a real key press, and the popup
+ * starts the capture. On macOS the event needs the native key code too.
  */
 import type { Page, Worker } from '@playwright/test';
 import type {} from '@/capture/testHook';
@@ -33,8 +33,8 @@ async function pressCaptureShortcut(page: Page): Promise<void> {
 /**
  * Press Alt+Shift+P until a capture is running. In a brand-new profile Chrome binds extension
  * command accelerators a moment after startup (measured: about one press in three is ignored in
- * the first ~second), which a real user never sees. Re-pressing is safe: a second press within
- * 800 ms of a capture starting is treated as a double-press and ignored.
+ * the first ~second), which a real user never sees. Re-pressing is safe: pressing again only
+ * toggles the popup; it never cancels.
  */
 async function startViaShortcut(page: Page, sw: Worker): Promise<void> {
   const running = () => sw.evaluate(() => globalThis.__pagesnapCapture?.activeId() ?? null);
@@ -80,7 +80,7 @@ test('Alt+Shift+P is registered and captures the page into the editor', async ({
   expect(await pageState(page)).toEqual(before);
 });
 
-test('pressing Alt+Shift+P again mid-capture cancels it, keeping what was captured', async ({
+test('pressing Alt+Shift+P again mid-capture does not cancel it', async ({
   context,
   pagesnap,
   serviceWorker,
@@ -105,15 +105,14 @@ test('pressing Alt+Shift+P again mid-capture cancels it, keeping what was captur
       { timeout: 20_000 },
     )
     .toBeGreaterThanOrEqual(2);
+  // Twice: closes the popup, then opens it again on the running capture.
+  await pressCaptureShortcut(page);
   await pressCaptureShortcut(page);
   const editor = await editorOpened;
   const id = decodeURIComponent(new URL(editor.url()).hash.replace(/^#s=/, ''));
   const session = await getSession(serviceWorker, id);
-  expect(session.status).toBe('partial');
-  expect(session.error?.code).toBe('ABORTED_BY_USER');
+  expect(session.status).toBe('ready');
+  expect(session.error).toBeNull();
+  expect(session.css.h).toBe(8000);
   await waitReady(editor);
-  // Alt+Shift+P is the toolbar action, so the notice says the capture was stopped from there.
-  await expect(editor.getByTestId('capture-notice')).toContainText(
-    'You clicked Page Snap again, so the capture stopped early.',
-  );
 });

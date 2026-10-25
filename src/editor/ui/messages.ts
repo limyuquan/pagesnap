@@ -335,7 +335,7 @@ export function errorContent(input: {
         title: 'Capture cancelled',
         body:
           humanMessage(message) ||
-          'It was stopped, with Esc or a second click on Page Snap, before the first screenshot was taken.',
+          'It was stopped with Esc or Stop before the first screenshot was taken.',
         code: captureCode,
         retry: 'capture',
       };

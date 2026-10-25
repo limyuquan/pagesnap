@@ -25,7 +25,8 @@ test('extension loads with the e2e manifest and test hooks', async ({
     'contextMenus',
   ]);
   expect(info.hostPermissions).toEqual(['<all_urls>']);
-  expect(info.popup).toBeNull();
+  // The toolbar button opens the capture popup (it starts the capture; Esc/Stop cancel).
+  expect(info.popup).toBe('popup.html');
   expect(info.hooks).toEqual(['clickAction', 'seedSyntheticSession', 'startCapture']);
 });
 

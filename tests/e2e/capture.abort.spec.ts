@@ -93,7 +93,7 @@ test('Esc in the page cancels; the editor still opens with what was captured', a
   expect(await pageState(page)).toEqual(before);
 });
 
-test('a toolbar click during a capture cancels it', async ({ pagesnap, serviceWorker }) => {
+test('Stop in the popup cancels a capture', async ({ pagesnap, serviceWorker }) => {
   const page = await pagesnap.openFixture('bands');
   const tabId = await pagesnap.tabIdOf(page);
   await startCaptureAsync(serviceWorker, tabId);
@@ -102,6 +102,7 @@ test('a toolbar click during a capture cancels it', async ({ pagesnap, serviceWo
   const s = await waitForFinal(serviceWorker, id);
   expect(s.status).toBe('partial');
   expect(s.error?.code).toBe('ABORTED_BY_USER');
+  expect(s.error?.message).toBe('You pressed Stop, so the capture stopped early.');
 });
 
 test('a page the agent cannot script falls back to the visible area', async ({

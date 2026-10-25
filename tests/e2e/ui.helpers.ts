@@ -283,7 +283,7 @@ export function lmsAnnotations(
     },
   ];
   return {
-    v: 1,
+    v: 2, // DOC_VERSION
     sessionId,
     rev: 1,
     image: { ...image, dpr },

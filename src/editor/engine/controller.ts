@@ -19,21 +19,31 @@ import type { Point, Rect } from '@/shared/types';
 import {
   ARROW_HEAD_MIN_CSS,
   ARROW_HEAD_WIDTHS,
+  type BoxHandle,
+  boxPoint,
   dist,
   dragHandle,
   FONT_STACK,
+  groupScale,
   type HandleId,
   HIT_TOLERANCE_CSS,
+  handleAngle,
+  hitGroupHandle,
   hitHandle,
   hitTestShapes,
   imageToScreen,
+  interactiveHandles,
+  pointInRect,
   rectFromPoints,
+  scaleShape,
   screenToImage,
+  shapesBounds,
   shapesInRect,
   snapAngle,
   squareFrom,
   TEXT_LINE_HEIGHT,
   TEXT_OUTLINE_RATIO,
+  textLayout,
   translateShape,
   zoomAround,
   zoomLimits,
@@ -44,8 +54,10 @@ import { type DrawTool, type EditorState, useEditorStore } from './store';
 
 /** Below this on-screen length (CSS px) a drag is a click: no shape is created. */
 const MIN_DRAG_CSS = 5;
+/** A press on a mark moves it only once the pointer has travelled this far (CSS px). */
+const MOVE_SLOP_CSS = 3;
 /** Handle grab radius, CSS px. */
-const HANDLE_HIT_CSS = 9;
+const HANDLE_HIT_CSS = 10;
 
 type Gesture =
   | { kind: 'pan'; pointerId: number; start: Point; cam: { x: number; y: number } }
@@ -69,16 +81,46 @@ type Gesture =
       cur: Point;
       ids: ReadonlySet<ShapeId>;
       shift: boolean;
+      /** Past the slop: the marks follow the pointer. */
+      moved: boolean;
+      /** Alt-drag on the selection: original id → copy id (the copies move, the originals stay). */
+      dup: ReadonlyMap<ShapeId, ShapeId> | null;
+      /** Text tool pressed on the already-selected text: a click (no move) edits it. */
+      editOnClick: TextShape | null;
     }
   | {
       kind: 'handle';
       pointerId: number;
       shape: Shape;
       handle: HandleId;
+      start: Point;
       cur: Point;
+      /** Handle position minus the press point: the handle keeps its offset from the pointer. */
+      grab: Point;
+      /** Past the slop (a click on a handle changes nothing). */
+      moved: boolean;
       shift: boolean;
+      alt: boolean;
+    }
+  | {
+      kind: 'group';
+      pointerId: number;
+      /** The selected marks at the press, and their group box. */
+      shapes: ReadonlyMap<ShapeId, Shape>;
+      bounds: Rect;
+      handle: BoxHandle;
+      start: Point;
+      cur: Point;
+      grab: Point;
+      moved: boolean;
+      alt: boolean;
     }
   | { kind: 'marquee'; pointerId: number; start: Point; cur: Point; base: readonly ShapeId[] };
+
+/** What a press at a point would grab. */
+type HandleTarget =
+  | { kind: 'shape'; shape: Shape; handle: HandleId; at: Point }
+  | { kind: 'group'; shapes: Shape[]; bounds: Rect; handle: BoxHandle; at: Point };
 
 interface TextEdit {
   shape: TextShape;
@@ -110,6 +152,60 @@ const HIGHLIGHT_CURSOR = svgCursor(
   'crosshair',
 );
 
+const CSS_RESIZE = ['ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize'] as const;
+const cursorCache = new Map<string, string>();
+
+/** Angle (radians) bucketed to 15°, as whole degrees in [0, 360). */
+function bucketDeg(angle: number): number {
+  const deg = Math.round((angle * 180) / Math.PI / 15) * 15;
+  return ((deg % 360) + 360) % 360;
+}
+
+/**
+ * A double-headed resize arrow pointing along `angle` (so handles of rotated marks get a cursor
+ * that matches their direction), black with a white rim like the system's. Falls back to the
+ * nearest of the four CSS resize cursors.
+ */
+function resizeCursor(angle: number): string {
+  const deg = bucketDeg(angle) % 180;
+  const key = `r${deg}`;
+  const hit = cursorCache.get(key);
+  if (hit) return hit;
+  const fallback = CSS_RESIZE[Math.round(deg / 45) % 4] as string;
+  const c = svgCursor(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><g transform="rotate(${deg} 12 12)"><path d="M2.5 12 7.5 7v3.6h9V7l5 5-5 5v-3.6h-9V17z" fill="#000" stroke="#fff" stroke-width="1.3" stroke-linejoin="round"/></g></svg>`,
+    12,
+    fallback,
+  );
+  cursorCache.set(key, c);
+  return c;
+}
+
+/** A curved two-headed arrow for the rotation handle, turned with the mark. */
+function rotateCursor(angle: number): string {
+  const deg = bucketDeg(angle);
+  const key = `o${deg}`;
+  const hit = cursorCache.get(key);
+  if (hit) return hit;
+  const arc = 'M6.4 14.2Q12 6.6 17.6 14.2';
+  const heads = 'M19.6 16.6 15.2 14.6 19.4 11.2zM4.4 16.6 8.8 14.6 4.6 11.2z';
+  const c = svgCursor(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><g transform="rotate(${deg} 12 12)"><path d="${arc}" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round"/><path d="${heads}" fill="#fff" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/><path d="${arc}" fill="none" stroke="#000" stroke-width="1.6" stroke-linecap="round"/><path d="${heads}" fill="#000"/></g></svg>`,
+    12,
+    'grab',
+  );
+  cursorCache.set(key, c);
+  return c;
+}
+
+/** Cursor over a handle: a resize arrow along its direction, the rotate arrow, or a pointer. */
+function handleCursor(shape: Shape | null, h: HandleId): string {
+  if (h === 'rot') return rotateCursor(handleAngle(shape, h));
+  if (h === 'a' || h === 'b') return 'crosshair';
+  if (h === 'mid') return 'pointer';
+  return resizeCursor(handleAngle(shape, h));
+}
+
 export class CanvasController {
   private readonly root: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
@@ -124,6 +220,9 @@ export class CanvasController {
   private rect: DOMRect | null = null;
   private readonly cleanups: (() => void)[] = [];
   private lastHoverCursor = '';
+  /** The mark under the pointer (hover outline), and where the pointer last was. */
+  private hoverId: ShapeId | null = null;
+  private lastPointer: { clientX: number; clientY: number } | null = null;
 
   constructor(
     root: HTMLElement,
@@ -137,6 +236,11 @@ export class CanvasController {
     this.img = img;
     this.renderer = new Renderer(canvas);
     this.renderer.setDraftProvider(() => this.draft());
+    if (import.meta.env.MODE === 'e2e') {
+      const hook = (window as unknown as { __pagesnapEngine?: Record<string, unknown> })
+        .__pagesnapEngine;
+      if (hook) hook.hover = () => this.hoverId;
+    }
 
     const on = <K extends keyof HTMLElementEventMap>(
       el: HTMLElement | Window | Document,
@@ -166,6 +270,9 @@ export class CanvasController {
     // Safari-style gesture events would zoom the page; Chrome sends ctrl+wheel instead.
     on(window, 'keydown', (e: KeyboardEvent) => this.onKey(e, true), { capture: true });
     on(window, 'keyup', (e: KeyboardEvent) => this.onKey(e, false), { capture: true });
+    on(canvas, 'pointerleave', () => {
+      if (!this.gesture) this.setHover(null);
+    });
     on(window, 'blur', () => {
       this.spaceHeld = false;
       this.updateCursor();
@@ -262,31 +369,33 @@ export class CanvasController {
     const s = useEditorStore.getState();
     const doc = s.doc;
     const g = this.gesture;
-    if (!doc || !g) return null;
+    if (!doc) return null;
+    if (!g) return this.hoverId ? { hover: this.hoverId } : null;
     switch (g.kind) {
       case 'draw': {
         const shape = this.buildShape(g, s);
         return shape ? { doc: { ...doc, shapes: [...doc.shapes, shape] } } : null;
       }
       case 'move': {
-        const dx = g.cur.x - g.start.x;
-        const dy = g.cur.y - g.start.y;
-        const [mx, my] = this.moveDelta(dx, dy, g.shift);
+        const next = this.movedShapes(g, doc);
         return {
-          doc: {
-            ...doc,
-            shapes: doc.shapes.map((sh) => (g.ids.has(sh.id) ? translateShape(sh, mx, my) : sh)),
-          },
-          selection: [...g.ids],
+          doc: { ...doc, shapes: next.shapes },
+          selection: next.selection,
+          noHandles: g.moved,
         };
       }
       case 'handle': {
-        const next = dragHandle(g.shape, g.handle, g.cur, g.shift);
+        const next = this.handleShape(g, s);
         return {
           doc: { ...doc, shapes: doc.shapes.map((sh) => (sh.id === g.shape.id ? next : sh)) },
           selection: [g.shape.id],
         };
       }
+      case 'group':
+        return {
+          doc: { ...doc, shapes: this.groupShapes(g, doc) },
+          selection: [...g.shapes.keys()],
+        };
       case 'marquee': {
         const r = rectFromPoints(g.start, g.cur);
         return { marquee: r, selection: this.marqueeSelection(g, r, s) };
@@ -296,10 +405,56 @@ export class CanvasController {
     }
   }
 
-  private moveDelta(dx: number, dy: number, shift: boolean): [number, number] {
+  private moveDelta(g: Extract<Gesture, { kind: 'move' }>): [number, number] {
+    if (!g.moved) return [0, 0];
+    const dx = g.cur.x - g.start.x;
+    const dy = g.cur.y - g.start.y;
     // Shift constrains the move to the dominant axis.
-    if (!shift) return [dx, dy];
+    if (!g.shift) return [dx, dy];
     return Math.abs(dx) >= Math.abs(dy) ? [dx, 0] : [0, dy];
+  }
+
+  /** Shapes and selection of a move (or Alt-drag duplicate) at its current pointer position. */
+  private movedShapes(
+    g: Extract<Gesture, { kind: 'move' }>,
+    doc: AnnotationDoc,
+  ): { shapes: readonly Shape[]; selection: ShapeId[] } {
+    const [dx, dy] = this.moveDelta(g);
+    if (g.dup) {
+      const dup = g.dup;
+      const copies = doc.shapes
+        .filter((sh) => dup.has(sh.id))
+        .map((sh) => translateShape({ ...sh, id: dup.get(sh.id) as ShapeId }, dx, dy));
+      return { shapes: [...doc.shapes, ...copies], selection: copies.map((c) => c.id) };
+    }
+    return {
+      shapes: doc.shapes.map((sh) => (g.ids.has(sh.id) ? translateShape(sh, dx, dy) : sh)),
+      selection: [...g.ids],
+    };
+  }
+
+  /** The handle's own position now: where it was, plus how far the pointer has moved. */
+  private grabbed(g: { cur: Point; grab: Point }): Point {
+    return { x: g.cur.x + g.grab.x, y: g.cur.y + g.grab.y };
+  }
+
+  private handleShape(g: Extract<Gesture, { kind: 'handle' }>, s: EditorState): Shape {
+    if (!g.moved) return g.shape;
+    return dragHandle(g.shape, g.handle, this.grabbed(g), {
+      shift: g.shift,
+      alt: g.alt,
+      zoom: s.camera.zoom,
+      start: { x: g.start.x + g.grab.x, y: g.start.y + g.grab.y },
+    });
+  }
+
+  private groupShapes(g: Extract<Gesture, { kind: 'group' }>, doc: AnnotationDoc): Shape[] {
+    if (!g.moved) return doc.shapes.slice();
+    const { anchor, k } = groupScale(g.bounds, g.handle, this.grabbed(g), g.alt);
+    return doc.shapes.map((sh) => {
+      const orig = g.shapes.get(sh.id);
+      return orig ? scaleShape(orig, anchor, k) : sh;
+    });
   }
 
   private marqueeSelection(
@@ -357,7 +512,7 @@ export class CanvasController {
           shadow,
           box,
           width: size,
-          fill: 'none',
+          fill: style.fill ?? 'none',
         };
       }
       case 'underline': {
@@ -423,9 +578,50 @@ export class CanvasController {
 
   // ------------------------------------------------------------------ pointer
 
+  /** Handle of the selection under `p`: the single mark's own handles, or the group's corners. */
+  private handleAt(s: EditorState, p: Point): HandleTarget | null {
+    const doc = s.doc;
+    if (!doc || s.selection.length === 0) return null;
+    const tol = this.tol(s, HANDLE_HIT_CSS);
+    if (s.selection.length === 1) {
+      const sel = doc.shapes.find((sh) => sh.id === s.selection[0]);
+      if (!sel || sel.id === s.editingTextId) return null;
+      const h = hitHandle(sel, p, tol, s.camera.zoom);
+      const at = h && interactiveHandles(sel, s.camera.zoom).find((x) => x.id === h);
+      return h && at ? { kind: 'shape', shape: sel, handle: h, at: { x: at.x, y: at.y } } : null;
+    }
+    const shapes = this.selectedShapes(s);
+    const bounds = shapesBounds(shapes, doc.image.dpr);
+    if (!bounds) return null;
+    const h = hitGroupHandle(bounds, p, tol);
+    return h ? { kind: 'group', shapes, bounds, handle: h, at: boxPoint(bounds, h) } : null;
+  }
+
+  private selectedShapes(s: EditorState): Shape[] {
+    if (!s.doc || s.selection.length === 0) return [];
+    const sel = new Set(s.selection);
+    return s.doc.shapes.filter((sh) => sel.has(sh.id));
+  }
+
+  /** Inside the group box of a multi-selection (a press there moves the group). */
+  private inGroupBox(s: EditorState, p: Point): boolean {
+    if (!s.doc || s.selection.length < 2) return false;
+    const b = shapesBounds(this.selectedShapes(s), s.doc.image.dpr);
+    return !!b && pointInRect(p, b);
+  }
+
+  /**
+   * Press, with any tool:
+   * 1. on a handle of the selection: resize / rotate / bend it;
+   * 2. on a mark: select it (Shift toggles it in the selection) and move it. The tool stays, so
+   *    after deselecting you keep drawing with it;
+   * 3. on empty page: deselect and draw with the tool (V: marquee).
+   * Alt/Option forces drawing on top of a mark: Alt+press on an unselected mark draws (case 3),
+   * while Alt+drag on a selected mark duplicates the selection (the Figma convention).
+   */
   private onPointerDown(e: PointerEvent): void {
     this.rect = this.canvas.getBoundingClientRect();
-    const s = useEditorStore.getState();
+    let s = useEditorStore.getState();
     if (e.button === 2) {
       this.armImg();
       return;
@@ -455,6 +651,7 @@ export class CanvasController {
         start: this.local(e),
         cam: { x: s.camera.x, y: s.camera.y },
       };
+      this.setHover(null);
       this.updateCursor();
       return;
     }
@@ -465,74 +662,137 @@ export class CanvasController {
       this.commitText();
       // A click away from the text box just finishes editing.
       if (wasText) return;
+      s = useEditorStore.getState();
     }
 
     const doc = s.doc;
+    const session = s.session;
+    if (!doc || !session) return;
     const dpr = doc.image.dpr;
+    this.setHover(null);
 
-    // A handle of the single selected shape wins, whatever the tool.
-    if (s.selection.length === 1) {
-      const sel = doc.shapes.find((sh) => sh.id === s.selection[0]);
-      const h = sel ? hitHandle(sel, p, this.tol(s, HANDLE_HIT_CSS)) : null;
-      if (sel && h) {
-        this.capture(id);
-        this.gesture = {
-          kind: 'handle',
-          pointerId: id,
-          shape: sel,
-          handle: h,
-          cur: p,
-          shift: e.shiftKey,
-        };
-        return;
-      }
-    }
-
-    if (s.tool === 'select') {
-      const hit = hitTestShapes(doc.shapes, p, this.tol(s), dpr);
-      if (hit) {
-        let selection = s.selection;
-        if (e.shiftKey) {
-          selection = selection.includes(hit.id)
-            ? selection.filter((x) => x !== hit.id)
-            : [...selection, hit.id];
-        } else if (!selection.includes(hit.id)) {
-          selection = [hit.id];
-        }
-        s.actions.setSelection(selection);
-        if (!selection.includes(hit.id)) return;
-        this.capture(id);
-        this.gesture = {
-          kind: 'move',
-          pointerId: id,
-          start: p,
-          cur: p,
-          ids: new Set(selection),
-          shift: false,
-        };
-      } else {
-        if (!e.shiftKey) s.actions.clearSelection();
-        this.capture(id);
-        this.gesture = {
-          kind: 'marquee',
-          pointerId: id,
-          start: p,
-          cur: p,
-          base: e.shiftKey ? s.selection : [],
-        };
-      }
+    // 1. A handle of the selection wins, whatever the tool.
+    const target = this.handleAt(s, p);
+    if (target) {
+      this.capture(id);
+      const grab = { x: target.at.x - p.x, y: target.at.y - p.y };
+      this.gesture =
+        target.kind === 'shape'
+          ? {
+              kind: 'handle',
+              pointerId: id,
+              shape: target.shape,
+              handle: target.handle,
+              start: p,
+              cur: p,
+              grab,
+              moved: false,
+              shift: e.shiftKey,
+              alt: e.altKey,
+            }
+          : {
+              kind: 'group',
+              pointerId: id,
+              shapes: new Map(target.shapes.map((sh) => [sh.id, sh])),
+              bounds: target.bounds,
+              handle: target.handle,
+              start: p,
+              cur: p,
+              grab,
+              moved: false,
+              alt: e.altKey,
+            };
+      this.renderer.invalidate();
       return;
     }
 
-    if (s.tool === 'text') {
-      const hit = hitTestShapes(doc.shapes, p, this.tol(s), dpr);
-      if (hit?.kind === 'text') {
-        this.startTextEdit(hit, false);
-        e.preventDefault();
-        return;
+    // 2. A mark.
+    const hit = hitTestShapes(doc.shapes, p, this.tol(s), dpr);
+    const hitSelected = !!hit && s.selection.includes(hit.id);
+    if (hit && e.altKey && hitSelected) {
+      // Alt-drag the selection: duplicate it.
+      this.capture(id);
+      this.gesture = {
+        kind: 'move',
+        pointerId: id,
+        start: p,
+        cur: p,
+        ids: new Set(s.selection),
+        shift: e.shiftKey,
+        moved: false,
+        dup: new Map(s.selection.map((sid) => [sid, newId()])),
+        editOnClick: null,
+      };
+      return;
+    }
+    if (hit && !e.altKey) {
+      let selection = s.selection;
+      if (e.shiftKey) {
+        selection = hitSelected ? selection.filter((x) => x !== hit.id) : [...selection, hit.id];
+      } else if (!hitSelected) {
+        selection = [hit.id];
       }
+      s.actions.setSelection(selection);
+      if (!selection.includes(hit.id)) return;
+      this.capture(id);
+      this.gesture = {
+        kind: 'move',
+        pointerId: id,
+        start: p,
+        cur: p,
+        ids: new Set(selection),
+        shift: false,
+        moved: false,
+        dup: null,
+        editOnClick:
+          s.tool === 'text' &&
+          hit.kind === 'text' &&
+          hitSelected &&
+          !e.shiftKey &&
+          selection.length === 1
+            ? hit
+            : null,
+      };
+      if (hit.kind === 'text' && s.tool === 'text') e.preventDefault();
+      return;
+    }
+
+    // Inside a multi-selection's box: move the group.
+    if (!e.altKey && !e.shiftKey && this.inGroupBox(s, p)) {
+      this.capture(id);
+      this.gesture = {
+        kind: 'move',
+        pointerId: id,
+        start: p,
+        cur: p,
+        ids: new Set(s.selection),
+        shift: false,
+        moved: false,
+        dup: null,
+        editOnClick: null,
+      };
+      return;
+    }
+
+    // 3. Empty page (or Alt over an unselected mark): the tool's own gesture.
+    if (s.tool === 'select') {
+      if (!e.shiftKey) s.actions.clearSelection();
+      this.capture(id);
+      this.gesture = {
+        kind: 'marquee',
+        pointerId: id,
+        start: p,
+        cur: p,
+        base: e.shiftKey ? s.selection : [],
+      };
+      return;
+    }
+
+    if (s.selection.length > 0) s.actions.clearSelection();
+
+    if (s.tool === 'text') {
       const style = s.styles.text;
-      const size = style.size * s.session.dpr;
+      const size = style.size * session.dpr;
       const shape: TextShape = {
         id: newId(),
         kind: 'text',
@@ -550,7 +810,6 @@ export class CanvasController {
       return;
     }
 
-    if (s.selection.length > 0) s.actions.clearSelection();
     this.capture(id);
     const pressure = e.pointerType === 'pen' ? e.pressure || 0.5 : 0.5;
     this.gesture = {
@@ -577,6 +836,7 @@ export class CanvasController {
   }
 
   private onPointerMove(e: PointerEvent): void {
+    this.lastPointer = { clientX: e.clientX, clientY: e.clientY };
     const g = this.gesture;
     if (!g) {
       this.hover(e);
@@ -611,10 +871,19 @@ export class CanvasController {
       case 'move':
         g.cur = this.toImage(e);
         g.shift = e.shiftKey;
+        if (!g.moved && dist(g.start, g.cur) * s.camera.zoom >= MOVE_SLOP_CSS) {
+          g.moved = true;
+          this.setCursor(g.dup ? 'copy' : 'move');
+        }
+        if (!g.moved) return;
         break;
       case 'handle':
+      case 'group':
         g.cur = this.toImage(e);
-        g.shift = e.shiftKey;
+        if (g.kind === 'handle') g.shift = e.shiftKey;
+        g.alt = e.altKey;
+        if (!g.moved && dist(g.start, g.cur) * s.camera.zoom >= MOVE_SLOP_CSS) g.moved = true;
+        if (!g.moved) return;
         break;
       case 'marquee':
         g.cur = this.toImage(e);
@@ -644,22 +913,34 @@ export class CanvasController {
         break;
       }
       case 'move': {
-        const [dx, dy] = this.moveDelta(g.cur.x - g.start.x, g.cur.y - g.start.y, g.shift);
-        if (doc && (dx !== 0 || dy !== 0)) {
-          s._engine._commit({
-            ...doc,
-            shapes: doc.shapes.map((sh) => (g.ids.has(sh.id) ? translateShape(sh, dx, dy) : sh)),
-          });
+        if (!doc) break;
+        if (!g.moved) {
+          // A click: the mark stays selected (with the Text tool, a click on the selected text
+          // edits it).
+          if (g.editOnClick && doc.shapes.includes(g.editOnClick)) {
+            this.startTextEdit(g.editOnClick, false);
+          }
+          break;
         }
+        const next = this.movedShapes(g, doc);
+        s._engine._commit({ ...doc, shapes: next.shapes }, next.selection);
         break;
       }
       case 'handle': {
-        const next = dragHandle(g.shape, g.handle, g.cur, g.shift);
+        const next = this.handleShape(g, s);
         if (doc && next !== g.shape) {
           s._engine._commit(
             { ...doc, shapes: doc.shapes.map((sh) => (sh.id === g.shape.id ? next : sh)) },
             [g.shape.id],
           );
+        }
+        break;
+      }
+      case 'group': {
+        if (!doc) break;
+        const shapes = this.groupShapes(g, doc);
+        if (shapes.some((sh, i) => sh !== doc.shapes[i])) {
+          s._engine._commit({ ...doc, shapes }, [...g.shapes.keys()]);
         }
         break;
       }
@@ -671,7 +952,8 @@ export class CanvasController {
         break;
       }
     }
-    this.updateCursor();
+    this.lastHoverCursor = '';
+    this.hover(e);
     this.renderer.invalidate();
   }
 
@@ -695,23 +977,56 @@ export class CanvasController {
     }
   }
 
-  private hover(e: PointerEvent): void {
+  /** The mark under the pointer gets an outline; the cursor says what a press would do. */
+  private hover(e: { clientX: number; clientY: number; altKey: boolean }): void {
     const s = useEditorStore.getState();
-    if (!s.doc || this.spaceHeld) return;
+    if (!s.doc || this.spaceHeld || s.load.phase !== 'ready' || this.gesture) {
+      this.setHover(null);
+      if (!this.gesture) this.updateCursor();
+      return;
+    }
     const p = this.toImage(e);
-    let cursor = '';
-    if (s.selection.length === 1) {
-      const sel = s.doc.shapes.find((sh) => sh.id === s.selection[0]);
-      const h = sel ? hitHandle(sel, p, this.tol(s, HANDLE_HIT_CSS)) : null;
-      if (h) cursor = handleCursor(h);
+    const target = this.handleAt(s, p);
+    if (target) {
+      this.setHover(null);
+      this.setCursor(handleCursor(target.kind === 'shape' ? target.shape : null, target.handle));
+      return;
     }
-    if (!cursor && (s.tool === 'select' || s.tool === 'text')) {
-      const hit = hitTestShapes(s.doc.shapes, p, this.tol(s), s.doc.image.dpr);
-      if (hit)
-        cursor =
-          s.tool === 'text' && hit.kind === 'text' ? 'text' : s.tool === 'select' ? 'move' : '';
+    const hit = hitTestShapes(s.doc.shapes, p, this.tol(s), s.doc.image.dpr);
+    const selected = !!hit && s.selection.includes(hit.id);
+    if (hit && (!e.altKey || selected)) {
+      this.setHover(hit.id === s.editingTextId ? null : hit.id);
+      this.setCursor(e.altKey ? 'copy' : 'move');
+      return;
     }
-    this.setCursor(cursor || this.toolCursor(s));
+    this.setHover(null);
+    if (!e.altKey && this.inGroupBox(s, p)) {
+      this.setCursor('move');
+      return;
+    }
+    this.setCursor(this.toolCursor(s));
+  }
+
+  private setHover(id: ShapeId | null): void {
+    if (this.hoverId === id) return;
+    this.hoverId = id;
+    this.renderer.invalidate();
+  }
+
+  /** Modifier keys change what a press would do: re-run hover (and update a drag). */
+  private onModifier(e: KeyboardEvent): void {
+    const g = this.gesture;
+    if (
+      g &&
+      (g.kind === 'handle' || g.kind === 'draw' || g.kind === 'move' || g.kind === 'group')
+    ) {
+      if (g.kind !== 'group') g.shift = e.shiftKey;
+      if (g.kind !== 'move') g.alt = e.altKey;
+      this.renderer.invalidate();
+      return;
+    }
+    const lp = this.lastPointer;
+    if (!g && lp) this.hover({ ...lp, altKey: e.altKey });
   }
 
   private toolCursor(s: EditorState): string {
@@ -777,6 +1092,27 @@ export class CanvasController {
         this.gesture = null;
         this.renderer.invalidate();
         this.updateCursor();
+        return;
+      }
+      if (e.key === 'Alt' || e.key === 'Shift') {
+        this.onModifier(e);
+        return;
+      }
+      if (
+        down &&
+        e.key === 'Enter' &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        !this.edit &&
+        !this.gesture &&
+        !isInteractiveTarget(e.target) &&
+        this.editSelectedText()
+      ) {
+        // Enter on a single selected text edits it (Figma).
+        e.preventDefault();
+        e.stopImmediatePropagation();
       }
       return;
     }
@@ -802,6 +1138,16 @@ export class CanvasController {
   }
 
   // ------------------------------------------------------------------ text editing
+
+  /** Edit the selected text, if exactly one text is selected. */
+  editSelectedText(): boolean {
+    const s = useEditorStore.getState();
+    if (!s.doc || s.selection.length !== 1 || s.load.phase !== 'ready') return false;
+    const sh = s.doc.shapes.find((x) => x.id === s.selection[0]);
+    if (sh?.kind !== 'text') return false;
+    this.startTextEdit(sh, false);
+    return true;
+  }
 
   private startTextEdit(shape: TextShape, isNew: boolean): void {
     const s = useEditorStore.getState();
@@ -843,10 +1189,32 @@ export class CanvasController {
     const outline = Math.max(1, sh.size * TEXT_OUTLINE_RATIO * cam.zoom);
     st.setProperty('-webkit-text-stroke', `${outline}px #ffffff`);
     st.setProperty('paint-order', 'stroke fill');
-    const lines = ta.value.split('\n');
-    st.height = `${Math.max(1, lines.length) * fontPx * TEXT_LINE_HEIGHT}px`;
-    st.width = '0px';
-    st.width = `${Math.max(fontPx * 0.6, ta.scrollWidth + fontPx * 0.5)}px`;
+    if (sh.maxW !== undefined) {
+      // Fixed-width text wraps like the canvas does.
+      ta.wrap = 'soft';
+      st.whiteSpace = 'pre-wrap';
+      st.overflowWrap = 'anywhere';
+      st.width = `${Math.max(sh.maxW, sh.size) * cam.zoom}px`;
+      st.height = '0px';
+      st.height = `${Math.max(fontPx * TEXT_LINE_HEIGHT, ta.scrollHeight)}px`;
+    } else {
+      ta.wrap = 'off';
+      st.whiteSpace = 'pre';
+      st.overflowWrap = 'normal';
+      const lines = ta.value.split('\n');
+      st.height = `${Math.max(1, lines.length) * fontPx * TEXT_LINE_HEIGHT}px`;
+      st.width = '0px';
+      st.width = `${Math.max(fontPx * 0.6, ta.scrollWidth + fontPx * 0.5)}px`;
+    }
+    // A rotated text is edited in place, turned about the centre of its box.
+    const rot = sh.rotation ?? 0;
+    if (rot) {
+      const b = textLayout(sh).box;
+      st.transformOrigin = `${(b.w / 2) * cam.zoom}px ${(b.h / 2) * cam.zoom}px`;
+      st.transform = `rotate(${rot}rad)`;
+    } else {
+      st.transform = '';
+    }
   }
 
   private onTextKey(e: KeyboardEvent): void {
@@ -956,25 +1324,6 @@ export class CanvasController {
   private releaseImg(): void {
     this.imgMenuOpen = false;
     this.img.style.pointerEvents = 'none';
-  }
-}
-
-function handleCursor(h: HandleId): string {
-  switch (h) {
-    case 'n':
-    case 's':
-      return 'ns-resize';
-    case 'e':
-    case 'w':
-      return 'ew-resize';
-    case 'nw':
-    case 'se':
-      return 'nwse-resize';
-    case 'ne':
-    case 'sw':
-      return 'nesw-resize';
-    default:
-      return 'move';
   }
 }
 

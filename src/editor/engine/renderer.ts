@@ -8,9 +8,24 @@
  */
 import type { AnnotationDoc, ShapeId } from '@/shared/annotations';
 import type { Ctx2D } from '@/shared/composite';
-import type { Rect } from '@/shared/types';
+import type { Point, Rect } from '@/shared/types';
 import { drawDoc, type View } from './draw';
-import { imageToScreen, shapeBounds, shapeHandles, visibleRect } from './geometry';
+import {
+  groupHandles,
+  type Handle,
+  imageToScreen,
+  inflate,
+  interactiveHandles,
+  isRotatable,
+  rectCenter,
+  rotatedCorners,
+  rotateHandlePoint,
+  shapeFrame,
+  shapeOutline,
+  shapeRotation,
+  shapesBounds,
+  visibleRect,
+} from './geometry';
 import { perf } from './perf';
 import { type EditorState, useEditorStore } from './store';
 import { type LevelTile, levelForScale, TileCache } from './tiles';
@@ -25,12 +40,23 @@ export interface Draft {
   marquee?: Rect | null;
   /** Hide shapes (text in the overlay editor). */
   hidden?: ReadonlySet<ShapeId>;
+  /** The mark under the pointer (hover outline). */
+  hover?: ShapeId | null;
+  /** Hide the handles (while moving: the frame alone reads cleaner). */
+  noHandles?: boolean;
 }
 
 /** After the last camera change, wait this long before the high-quality "rest" redraw. */
 const REST_MS = 140;
 const SELECTION_COLOR = '#0A84FF';
+/** Hover outline: the system focus blue at 60%. */
+const HOVER_COLOR = 'rgba(10,132,255,0.6)';
+/** Square handle side, endpoint and rotation handle radii, CSS px. */
 const HANDLE_SIZE_CSS = 8;
+const ENDPOINT_R_CSS = 5;
+const MID_R_CSS = 4;
+const ROT_R_CSS = 4.5;
+const HANDLE_RING = 'rgba(28,28,30,0.72)';
 
 /** Copied-region flash (design review §5.5): fade in, hold, fade out. */
 export const FLASH_IN_MS = 120;
@@ -252,7 +278,7 @@ export class Renderer {
       hidden,
       cull: visible,
     });
-    this.drawOverlay(drawn, draft?.selection ?? s.selection, draft?.marquee ?? null, s);
+    this.drawOverlay(drawn, draft?.selection ?? s.selection, draft, s);
     this.drawFlash(s);
 
     if (s.load.phase === 'loading' && tiles?.covers(visible)) s._engine._firstPaint();
@@ -391,95 +417,150 @@ export class Renderer {
     }
   }
 
-  /** Selection boxes, handles and the marquee, in CSS px (fixed size at any zoom). */
+  /**
+   * Hover outline, selection frames, handles and the marquee, in CSS px (fixed size at any zoom).
+   * Lines are snapped to the device-pixel grid where they're axis-aligned, so they stay crisp.
+   */
   private drawOverlay(
     doc: AnnotationDoc,
     selection: readonly ShapeId[],
-    marquee: Rect | null,
+    draft: Draft | null,
     s: EditorState,
   ): void {
-    if (selection.length === 0 && !marquee) return;
+    const marquee = draft?.marquee ?? null;
+    const hoverId = draft?.hover ?? null;
+    if (selection.length === 0 && !marquee && !hoverId) return;
     const ctx = this.ctx;
     const D = this.dpr;
     const cam = s.camera;
     const dpr = doc.image.dpr;
+    const toS = (p: Point) => imageToScreen(cam, p);
+    // A 1 CSS px line is crisp centred on a device pixel (odd device width) or on a boundary.
+    const off = Math.round(D) % 2 === 1 ? 0.5 : 0;
+    const snap = (v: number) => (Math.round(v * D - off) + off) / D;
     ctx.save();
     ctx.setTransform(D, 0, 0, D, 0, 0);
     ctx.lineWidth = 1;
+    ctx.lineJoin = 'miter';
+
+    const poly = (pts: readonly Point[], closed: boolean, crisp: boolean) => {
+      ctx.beginPath();
+      pts.forEach((p, i) => {
+        const q = toS(p);
+        const x = crisp ? snap(q.x) : q.x;
+        const y = crisp ? snap(q.y) : q.y;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      if (closed) ctx.closePath();
+      ctx.stroke();
+    };
+
+    /** A mark's outline; frames sit half a pixel outside the ink so the line never covers it. */
+    const outline = (sh: (typeof doc.shapes)[number]) => {
+      const rot = shapeRotation(sh);
+      if (isRotatable(sh)) {
+        const f = shapeFrame(sh);
+        poly(rotatedCorners(inflate(f, 0.5 / cam.zoom), rectCenter(f), rot), true, rot === 0);
+        return;
+      }
+      const o = shapeOutline(sh);
+      poly(o.pts, o.closed, rot === 0);
+    };
+
     const sel = new Set(selection);
     const shapes = doc.shapes.filter((sh) => sel.has(sh.id) && sh.id !== s.editingTextId);
-    for (const sh of shapes) {
-      // Rects: on the stroke centre, where the handles are (design §3); others: their bounds.
-      const b = sh.kind === 'rect' ? sh.box : shapeBounds(sh, dpr);
-      const out = sh.kind === 'rect' ? 0 : 3;
-      const p0 = imageToScreen(cam, { x: b.x, y: b.y });
-      const p1 = imageToScreen(cam, { x: b.x + b.w, y: b.y + b.h });
-      const lineLike = sh.kind === 'arrow' || sh.kind === 'underline' || sh.kind === 'highlight';
-      if (!lineLike) {
-        ctx.setLineDash([4, 3]);
-        ctx.strokeStyle = SELECTION_COLOR;
-        ctx.strokeRect(
-          Math.round(p0.x - out) + 0.5,
-          Math.round(p0.y - out) + 0.5,
-          Math.round(p1.x - p0.x + 2 * out),
-          Math.round(p1.y - p0.y + 2 * out),
-        );
-        ctx.setLineDash([]);
+
+    // Hover: trace the mark under the pointer (not one that's already selected).
+    if (hoverId && !sel.has(hoverId) && hoverId !== s.editingTextId) {
+      const h = doc.shapes.find((sh) => sh.id === hoverId);
+      if (h) {
+        ctx.strokeStyle = HOVER_COLOR;
+        outline(h);
       }
     }
+
     if (shapes.length === 1) {
-      const only = shapes[0];
-      if (only) {
-        const half = HANDLE_SIZE_CSS / 2;
-        for (const h of shapeHandles(only)) {
-          const p = imageToScreen(cam, h);
-          ctx.beginPath();
-          if (h.id === 'a' || h.id === 'b') ctx.arc(p.x, p.y, half + 1, 0, Math.PI * 2);
-          else
-            ctx.rect(
-              Math.round(p.x - half) + 0.5,
-              Math.round(p.y - half) + 0.5,
-              HANDLE_SIZE_CSS,
-              HANDLE_SIZE_CSS,
-            );
-          // A faint dark ring first, so white handles still read on a red stroke.
-          ctx.strokeStyle = 'rgba(0,0,0,0.25)';
-          ctx.lineWidth = 3.5;
-          ctx.stroke();
-          ctx.fillStyle = '#FFFFFF';
-          ctx.fill();
-          ctx.strokeStyle = SELECTION_COLOR;
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
+      const only = shapes[0] as (typeof shapes)[number];
+      ctx.strokeStyle = SELECTION_COLOR;
+      if (isRotatable(only)) {
+        const rot = only.rotation ?? 0;
+        outline(only);
+        if (!draft?.noHandles) {
+          // Hairline from the top edge to the rotation handle.
+          const r = rotateHandlePoint(only, cam.zoom);
+          poly([r.base, r.at], false, rot === 0);
         }
       }
+      if (!draft?.noHandles) {
+        for (const h of interactiveHandles(only, cam.zoom)) this.drawHandle(h, only, cam, snap);
+      }
     } else if (shapes.length > 1) {
-      // Line-like shapes get endpoint dots so multi-selections stay legible.
-      for (const sh of shapes) {
-        for (const h of shapeHandles(sh)) {
-          if (h.id !== 'a' && h.id !== 'b') continue;
-          const p = imageToScreen(cam, h);
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
-          ctx.fillStyle = SELECTION_COLOR;
-          ctx.fill();
+      ctx.strokeStyle = HOVER_COLOR;
+      for (const sh of shapes) outline(sh);
+      const g = shapesBounds(shapes, dpr);
+      if (g) {
+        ctx.strokeStyle = SELECTION_COLOR;
+        poly(rotatedCorners(g, rectCenter(g), 0), true, true);
+        if (!draft?.noHandles) {
+          for (const h of groupHandles(g)) this.drawHandle(h, null, cam, snap);
         }
       }
     }
     if (marquee) {
-      const p0 = imageToScreen(cam, marquee);
-      const p1 = imageToScreen(cam, { x: marquee.x + marquee.w, y: marquee.y + marquee.h });
+      const p0 = toS(marquee);
+      const p1 = toS({ x: marquee.x + marquee.w, y: marquee.y + marquee.h });
       ctx.fillStyle = 'rgba(10,132,255,0.08)';
       ctx.fillRect(p0.x, p0.y, p1.x - p0.x, p1.y - p0.y);
       ctx.strokeStyle = SELECTION_COLOR;
       ctx.lineWidth = 1;
-      ctx.strokeRect(
-        Math.round(p0.x) + 0.5,
-        Math.round(p0.y) + 0.5,
-        Math.round(p1.x - p0.x),
-        Math.round(p1.y - p0.y),
-      );
+      ctx.strokeRect(snap(p0.x), snap(p0.y), snap(p1.x) - snap(p0.x), snap(p1.y) - snap(p0.y));
     }
+    ctx.restore();
+  }
+
+  /** One handle: white fill, dark hairline ring, a soft drop shadow; squares turn with the shape. */
+  private drawHandle(
+    h: Handle,
+    shape: AnnotationDoc['shapes'][number] | null,
+    cam: EditorState['camera'],
+    snap: (v: number) => number,
+  ): void {
+    const ctx = this.ctx;
+    const p = imageToScreen(cam, h);
+    const rot = shape ? shapeRotation(shape) : 0;
+    ctx.save();
+    ctx.beginPath();
+    if (h.id === 'a' || h.id === 'b') {
+      ctx.arc(p.x, p.y, ENDPOINT_R_CSS, 0, Math.PI * 2);
+    } else if (h.id === 'mid') {
+      ctx.arc(p.x, p.y, MID_R_CSS, 0, Math.PI * 2);
+    } else if (h.id === 'rot') {
+      ctx.arc(p.x, p.y, ROT_R_CSS, 0, Math.PI * 2);
+    } else {
+      // Text wrap handles (e/w) are upright pills; the rest are squares.
+      const pill = shape?.kind === 'text' && (h.id === 'e' || h.id === 'w');
+      const w = pill ? 5 : HANDLE_SIZE_CSS;
+      const ht = pill ? 14 : HANDLE_SIZE_CSS;
+      if (rot) {
+        ctx.translate(p.x, p.y);
+        ctx.rotate(rot);
+        ctx.roundRect(-w / 2, -ht / 2, w, ht, pill ? 2.5 : 1.5);
+      } else {
+        const x = snap(p.x - w / 2);
+        const y = snap(p.y - ht / 2);
+        ctx.roundRect(x, y, w, ht, pill ? 2.5 : 1.5);
+      }
+    }
+    ctx.shadowColor = 'rgba(0,0,0,0.28)';
+    ctx.shadowBlur = 3 * this.dpr;
+    ctx.shadowOffsetY = 0.5 * this.dpr;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.strokeStyle = HANDLE_RING;
+    ctx.lineWidth = 1;
+    ctx.stroke();
     ctx.restore();
   }
 

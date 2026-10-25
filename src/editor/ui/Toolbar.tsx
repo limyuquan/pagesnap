@@ -10,9 +10,12 @@ import { memo, useEffect, useRef, useState } from 'react';
 import {
   type DrawTool,
   type EditorState,
+  type RectFill,
   selectIsFitWidth,
   selectIsReady,
   selectZoomPercent,
+  shapeSize,
+  sizeKindOf,
   TOOL_LABELS,
   TOOL_SHORTCUTS,
   TOOLS,
@@ -128,38 +131,43 @@ function selectedShapes(s: EditorState): Shape[] {
 
 const selectStyleEnabled = (s: EditorState) => s.tool !== 'select' || s.selection.length > 0;
 
-/** Colour of the active tool, or the shared colour of the selection (`null` if mixed). */
+/**
+ * The colour and size controls follow the selection whenever something is selected (whatever the
+ * tool), and the active tool's defaults otherwise.
+ */
+/** Shared colour of the selection (`null` if mixed), else the active tool's colour. */
 const selectActiveColor = (s: EditorState): string | null => {
-  if (s.tool !== 'select') return s.styles[s.tool].color;
   const shapes = selectedShapes(s);
-  if (shapes.length === 0) return s.styles[lastDrawTool].color;
-  const first = shapes[0]?.color;
-  return first && shapes.every((sh) => sh.color === first) ? first : null;
+  if (shapes.length > 0) {
+    const first = shapes[0]?.color;
+    return first && shapes.every((sh) => sh.color === first) ? first : null;
+  }
+  return s.styles[s.tool === 'select' ? lastDrawTool : s.tool].color;
 };
 
-function shapeSizeImagePx(sh: Shape): number {
-  switch (sh.kind) {
-    case 'arrow':
-    case 'rect':
-    case 'underline':
-      return sh.width;
-    case 'highlight':
-      return sh.thickness;
-    case 'pen':
-    case 'text':
-      return sh.size;
-  }
-}
-
-const selectSizeKind = (s: EditorState): ShapeKind =>
-  s.tool !== 'select' ? s.tool : (selectedShapes(s)[0]?.kind ?? lastDrawTool);
+const selectSizeKind = (s: EditorState): ShapeKind => {
+  const first = selectedShapes(s)[0];
+  if (first) return sizeKindOf(first);
+  return s.tool !== 'select' ? s.tool : lastDrawTool;
+};
 
 const selectSize = (s: EditorState): number => {
-  if (s.tool !== 'select') return s.styles[s.tool].size;
   const first = selectedShapes(s)[0];
-  if (!first || !s.doc) return s.styles[lastDrawTool].size;
-  return Math.round(shapeSizeImagePx(first) / (s.doc.image.dpr || 1));
+  if (first && s.doc) return Math.round(shapeSize(first) / (s.doc.image.dpr || 1));
+  return s.styles[s.tool === 'select' ? lastDrawTool : s.tool].size;
 };
+
+/** Fill of the selected rects (first one), else of the Rectangle tool. */
+const selectRectFill = (s: EditorState): string => {
+  const rect = selectedShapes(s).find((sh) => sh.kind === 'rect');
+  if (rect?.kind === 'rect') return rect.fill;
+  return s.styles.rect.fill ?? 'none';
+};
+
+const FILLS: readonly { fill: RectFill; label: string }[] = [
+  { fill: 'none', label: 'No fill' },
+  { fill: 'tint', label: 'Tinted fill' },
+];
 
 /** Index of a colour in `PALETTE`, or -1. */
 const paletteIndex = (c: string | null) =>
@@ -312,6 +320,7 @@ export const SizeControl = memo(function SizeControl() {
   const kind = useEditorStore(selectSizeKind);
   const size = useEditorStore(selectSize);
   const enabled = useEditorStore(selectStyleEnabled);
+  const fill = useEditorStore(selectRectFill);
   const bump = useBump(kind, size);
   const steps = SIZE_STEPS_CSS[kind];
   return (
@@ -333,26 +342,53 @@ export const SizeControl = memo(function SizeControl() {
         </>
       }
     >
-      {(close) =>
-        steps.map((n) => (
-          <button
-            key={n}
-            type="button"
-            role="menuitemradio"
-            aria-checked={n === size}
-            className="ps-menuitem"
-            data-size={n}
-            onClick={() => {
-              actions().setSize(n);
-              close();
-            }}
-          >
-            <SizePreview kind={kind} size={n} />
-            <span className="tnum">{n} px</span>
-            {n === size && <CheckIcon className="ps-check ml-auto" />}
-          </button>
-        ))
-      }
+      {(close) => (
+        <>
+          {steps.map((n) => (
+            <button
+              key={n}
+              type="button"
+              role="menuitemradio"
+              aria-checked={n === size}
+              className="ps-menuitem"
+              data-size={n}
+              onClick={() => {
+                actions().setSize(n);
+                close();
+              }}
+            >
+              <SizePreview kind={kind} size={n} />
+              <span className="tnum">{n} px</span>
+              {n === size && <CheckIcon className="ps-check ml-auto" />}
+            </button>
+          ))}
+          {kind === 'rect' && (
+            <>
+              <div className="ps-menu-sep" />
+              {FILLS.map((f) => (
+                <button
+                  key={f.fill}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={fill === f.fill}
+                  className="ps-menuitem"
+                  data-fill={f.fill}
+                  onClick={() => {
+                    actions().setRectFill(f.fill);
+                    close();
+                  }}
+                >
+                  <span className="ps-size-prev" aria-hidden="true">
+                    <span className="ps-fill-swatch" data-fill={f.fill} />
+                  </span>
+                  <span>{f.label}</span>
+                  {fill === f.fill && <CheckIcon className="ps-check ml-auto" />}
+                </button>
+              ))}
+            </>
+          )}
+        </>
+      )}
     </MenuButton>
   );
 });

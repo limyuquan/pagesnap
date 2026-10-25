@@ -23,11 +23,14 @@ import { DEFAULT_HIGHLIGHT_OPACITY } from '@/shared/annotations';
 import type { Ctx2D } from '@/shared/composite';
 import type { Rect } from '@/shared/types';
 import {
-  arrowGeometry,
+  arrowHeads,
+  arrowShaft,
   inflate,
   isUnderlay,
   rectsIntersect,
   shapeBounds,
+  shapeCenter,
+  shapeRotation,
   TEXT_OUTLINE_RATIO,
   textFont,
   textLayout,
@@ -79,9 +82,20 @@ export function drawDoc(ctx: Ctx2D, doc: AnnotationDoc, view: View, opts: DrawOp
   ctx.restore();
 }
 
-/** Draw one shape. The context transform maps image px to output px with `scale`. */
+/**
+ * Draw one shape. The context transform maps image px to output px with `scale`. Rotated rects,
+ * texts and pens turn about their frame's centre (canvas shadows stay in output space, so the
+ * contrast shadow still falls straight down).
+ */
 export function drawShape(ctx: Ctx2D, s: Shape, dpr: number, scale: number): void {
   ctx.save();
+  const rot = shapeRotation(s);
+  if (rot && (s.kind === 'rect' || s.kind === 'text' || s.kind === 'pen')) {
+    const c = shapeCenter(s);
+    ctx.translate(c.x, c.y);
+    ctx.rotate(rot);
+    ctx.translate(-c.x, -c.y);
+  }
   switch (s.kind) {
     case 'highlight':
       drawHighlight(ctx, s);
@@ -128,20 +142,22 @@ function clearShadow(ctx: Ctx2D): void {
 }
 
 function drawArrow(ctx: Ctx2D, s: ArrowShape, dpr: number): void {
-  const g = arrowGeometry(s, dpr);
-  const back = s.heads === 'both' ? arrowGeometry({ a: s.b, b: s.a, width: s.width }, dpr) : null;
+  const shaftGeo = arrowShaft(s, dpr);
   ctx.strokeStyle = s.color;
   ctx.fillStyle = s.color;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  // Shaft (stopping inside each head), then the filled heads; a final shadowless stroke of the
-  // heads rounds their corners.
+  // Shaft (stopping inside each head; a quadratic when bent), then the filled heads, which follow
+  // the curve's tangent; a final shadowless stroke of the heads rounds their corners.
   const shaft = new Path2D();
-  const start = back ? back.shaftEnd : s.a;
-  shaft.moveTo(start.x, start.y);
-  shaft.lineTo(g.shaftEnd.x, g.shaftEnd.y);
+  shaft.moveTo(shaftGeo.from.x, shaftGeo.from.y);
+  if (shaftGeo.curved) {
+    shaft.quadraticCurveTo(shaftGeo.ctrl.x, shaftGeo.ctrl.y, shaftGeo.to.x, shaftGeo.to.y);
+  } else {
+    shaft.lineTo(shaftGeo.to.x, shaftGeo.to.y);
+  }
   const heads = new Path2D();
-  for (const h of back ? [g.head, back.head] : [g.head]) {
+  for (const h of arrowHeads(s, dpr)) {
     heads.moveTo(h[0].x, h[0].y);
     heads.lineTo(h[1].x, h[1].y);
     heads.lineTo(h[2].x, h[2].y);

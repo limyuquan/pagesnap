@@ -4,7 +4,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { browser } from 'wxt/browser';
-import { combo, prettyCommandShortcut } from '@/editor/ui/keys';
+import { combo, IS_MAC, prettyCommandShortcut } from '@/editor/ui/keys';
 import { COLOR_NAMES } from '@/editor/ui/palette';
 import { DEFAULT_COLOR, PALETTE } from '@/shared/annotations';
 import {
@@ -16,12 +16,25 @@ import {
 } from '@/shared/settings';
 import { deleteAll, formatBytes, readUsage, type Usage } from './storage';
 
-/** The editor's keys, grouped: tools and marks, then moving around, then output. */
+const ALT = IS_MAC ? '⌥' : 'Alt';
+const SHIFT = IS_MAC ? '⇧' : 'Shift';
+
+/**
+ * The editor's keys, grouped: tools and marks, then moving around, then output. Alt rule: Alt +
+ * press on an unselected mark draws on top of it; Alt-drag of a selected mark duplicates it.
+ */
 const EDITOR_KEYS: [string, string][] = [
   ['Arrow, Rectangle, Underline', 'A  R  U'],
   ['Highlighter, Pen, Text', 'H  P  T'],
   ['Select', 'V'],
-  ['Colour', '1 to 8'],
+  ['Move, resize or rotate a mark (any tool)', 'Click, drag'],
+  ['Draw on top of a mark', `${ALT} + drag`],
+  ['Duplicate by dragging a selected mark', `${ALT} + drag`],
+  ['Snap rotation and angles to 15°', `${SHIFT} + drag`],
+  ['Duplicate the selection', combo('mod+d')],
+  ['Select all', combo('mod+a')],
+  ['Edit the selected text', 'Enter'],
+  ['Colour (of the selection, or the tool)', '1 to 8'],
   ['Thinner, thicker', '[  ]'],
   ['Delete a selected mark', combo('backspace')],
   ['Nudge a selected mark', '←  ↑  →  ↓'],

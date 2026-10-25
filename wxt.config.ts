@@ -44,7 +44,9 @@ export default defineConfig({
     // e2e only: captureVisibleTab needs `<all_urls>` or an activeTab grant; a localhost-only host
     // permission is not enough (verified), and Playwright can't produce the activeTab gesture.
     ...(mode === 'e2e' && { host_permissions: ['<all_urls>'] }),
-    // No default_popup on purpose: a toolbar click fires action.onClicked and starts the capture.
+    // `default_popup` comes from the `popup` entrypoint (src/entrypoints/popup): a toolbar click
+    // or Alt+Shift+P opens it, and it starts the capture of its tab. The popup is drawn by Chrome
+    // outside the page, so the progress UI is never in a screenshot.
     action: {
       default_title: 'Capture full page (Alt+Shift+P)',
     },

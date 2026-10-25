@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en" data-phase="preparing">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Page Snap</title>
+    <!-- WXT would otherwise use the <title> as the toolbar tooltip. -->
+    <meta name="manifest.default_title" content="Capture full page (Alt+Shift+P)" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <!-- Static skeleton: the popup paints this before any script runs. -->
+    <main class="p" id="panel" aria-labelledby="phase">
+      <div class="mini" aria-hidden="true">
+        <div class="film" id="film">
+          <div class="ghost" id="ghost"></div>
+          <div class="edge" id="edge"></div>
+        </div>
+      </div>
+      <div class="info">
+        <div class="top">
+          <p class="phase" id="phase" aria-live="polite">Preparing the page…</p>
+          <button class="act" id="act" type="button" aria-keyshortcuts="Escape">
+            <span id="act-label">Stop</span><kbd>esc</kbd>
+          </button>
+        </div>
+        <p class="pct tnum" id="pct"><span id="pct-n">0</span><span class="pct-u">%</span></p>
+        <p class="msg" id="msg"></p>
+        <div class="page">
+          <p class="title" id="title">&nbsp;</p>
+          <p class="host" id="host">&nbsp;</p>
+        </div>
+        <div
+          class="bar"
+          id="bar"
+          role="progressbar"
+          aria-label="Capture progress"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+        >
+          <i id="fill"></i>
+        </div>
+        <p class="meta tnum" id="meta">&nbsp;</p>
+      </div>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

@@ -1,4 +1,4 @@
-/** Capture progress on the toolbar badge: the only feedback, since nothing is drawn in the page. */
+/** Capture progress on the toolbar badge: always on, with or without the popup open. */
 import { browser } from 'wxt/browser';
 
 /** The icon's graphite tile, so the progress badge reads as part of the icon. */

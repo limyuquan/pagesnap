@@ -7,6 +7,8 @@ import { compositeRegion } from '@/shared/composite';
 import { getSession, getSliceBlob } from '@/shared/db';
 import type { CaptureSession, Rect, SessionId } from '@/shared/types';
 import { activeCaptureId, cancelCapture, testFlags } from './orchestrator';
+import type { PopupState, PopupToSw } from './popupProtocol';
+import { getProgress, lastPopupPerf, viewerCount } from './progress';
 import { type RetentionOptions, type RetentionResult, runRetention } from './retention';
 import { type CaptureTimings, getTimings } from './timings';
 
@@ -16,8 +18,14 @@ export interface CaptureTestHook {
   /** Set test-only switches (slice/final write failures, pause limit). Returns the new flags. */
   setFlags(flags: Partial<typeof testFlags>): typeof testFlags;
   activeId(): SessionId | null;
-  /** What a toolbar click does during a capture. */
+  /** What Stop in the popup does during a capture. */
   cancel(): boolean;
+  /** Popups connected right now. */
+  viewers(): number;
+  /** The progress the popup of `tabId` is shown, if any. */
+  progress(tabId: number): PopupState | null;
+  /** The last popup's first-paint report. */
+  popupPerf(): Extract<PopupToSw, { t: 'perf' }> | null;
   session(id: SessionId): Promise<CaptureSession | null>;
   timings(id: SessionId): Promise<CaptureTimings | null>;
   /** Composite `region` (image px, default the whole image) at `scale` with `compositeRegion`. Base64 PNG. */
@@ -41,7 +49,10 @@ export const captureTestHook: CaptureTestHook = {
     return { ...testFlags };
   },
   activeId: activeCaptureId,
-  cancel: cancelCapture,
+  cancel: () => cancelCapture('button'),
+  viewers: viewerCount,
+  progress: getProgress,
+  popupPerf: lastPopupPerf,
   async session(id) {
     return (await getSession(id)) ?? null;
   },

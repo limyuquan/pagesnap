@@ -18,12 +18,18 @@ Plan: [docs/PLAN.md](docs/PLAN.md). Contracts and conventions: [docs/CONTRACTS.m
 ## Use
 
 - **Capture:** click the toolbar icon or press **Alt+Shift+P** (change it at
-  `chrome://extensions/shortcuts`). Keep the tab in front while the badge counts up; click again
-  or press Esc to stop early. The editor opens next to the page with the **Arrow** tool armed.
+  `chrome://extensions/shortcuts`). A small panel shows the page filling in as it's captured;
+  keep the tab in front, and press Esc or Stop to end early (closing the panel doesn't stop it).
+  The editor opens next to the page with the **Arrow** tool armed.
 - **Tools:** `A` arrow · `R` rectangle · `U` underline · `H` highlighter · `P` pen · `T` text ·
-  `V` select (drag to move, `Delete` to remove). Shift snaps arrows to 45° and rects to squares.
-- **Style:** `1`–`8` colour, `[` `]` thinner/thicker. Text: Enter to finish, Shift+Enter for a new
-  line.
+  `V` select (drag a box to select several). Shift snaps arrows to 45° and rects to squares.
+- **Edit marks with any tool:** click a mark to select it and drag to move it; its handles resize,
+  rotate (the circle above it) and bend arrows (the middle dot), Shift snaps to 15°. Hold `⌥` to
+  draw on top of a mark instead, or `⌥`-drag a selected mark to duplicate it. `⌘D` duplicates,
+  `⌘A` selects all, `Delete` removes, double-click (or `Enter`) edits text, `Esc` deselects.
+- **Style:** `1`–`8` colour, `[` `]` thinner/thicker. With marks selected these (and the toolbar)
+  change the selected marks; otherwise the tool's defaults. Text: Enter to finish, Shift+Enter for
+  a new line.
 - **Undo/redo:** `⌘Z` / `⇧⌘Z`. **Zoom:** `⌘+` / `⌘-`, `⌘0` fit width, `⌘1` 100%.
 - **Copy:** `⌘C` copies the whole page if it's at most 2576 px tall (what AI chats read at full
   resolution). On taller pages it copies 2576 px around your marks, starting from the top of the

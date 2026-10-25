@@ -1,7 +1,8 @@
 /**
  * Global editor keyboard shortcuts (owner: B). C calls `useEditorShortcuts()` once in `App`.
  * Map (03 §8, v0.1 subset): V/Esc select, A/R/U/H/P/T tools, 1–8 colours, [ ] size,
- * ⌘Z / ⇧⌘Z / ⌘Y undo/redo, ⌫/Del delete, ⌘A select all, ⌘C copy (default), ⇧⌘C copy full,
+ * ⌘Z / ⇧⌘Z / ⌘Y undo/redo, ⌫/Del delete, ⌘A select all (the tool stays), ⌘D duplicate the
+ * selection, Enter edit the selected text (in the controller), ⌘C copy (default), ⇧⌘C copy full,
  * ⌘S download, ⌘0 / ⌘1 / ⌘= / ⌘- zoom. Single keys are ignored while typing or composing.
  * Keyboard scrolling (qa-edge E7): with nothing selected ↑↓←→ scroll, PageUp/PageDown page,
  * Home/End jump to the top/bottom; with a selection the arrows nudge it 1 CSS px (⇧ 10).
@@ -130,6 +131,11 @@ export function handleEditorKey(e: KeyboardEvent): boolean {
         return prevent();
       case 'a':
         a.selectAll();
+        return prevent();
+      case 'd':
+        // Duplicate; with nothing selected the browser keeps ⌘D (bookmark).
+        if (s.selection.length === 0 || e.shiftKey) return false;
+        a.duplicateSelection();
         return prevent();
       case 's':
         a.download();

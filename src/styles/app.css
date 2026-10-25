@@ -528,6 +528,16 @@ a.ps-ident:hover .ps-ident-host {
 .ps-menuitem[aria-checked="true"] .ps-size-prev {
   color: var(--ps-ink);
 }
+/* Rect fill: a small rounded box, hollow or tinted. */
+.ps-fill-swatch {
+  width: 18px;
+  height: 13px;
+  border: 1.5px solid currentColor;
+  border-radius: 3px;
+}
+.ps-fill-swatch[data-fill="tint"] {
+  background: color-mix(in srgb, currentColor 22%, transparent);
+}
 
 /* Zoom. */
 .ps-zoom-label {

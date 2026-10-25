@@ -28,6 +28,7 @@ import {
 } from '@/shared/annotations';
 import { getDoc } from '@/shared/db';
 import { waitForFinalSession } from '@/shared/handoff';
+import { newId } from '@/shared/ids';
 import { DEFAULT_SETTINGS, getSettings, type Settings, watchSettings } from '@/shared/settings';
 import type { CaptureSource } from '@/shared/source';
 import type { CaptureSession, Point, Rect, SessionId, Size } from '@/shared/types';
@@ -39,6 +40,7 @@ import {
   clampCamera,
   fitWidthCamera,
   fitWidthZoom,
+  interactiveHandles,
   translateShape,
   visibleRect,
   zoomAround,
@@ -100,7 +102,12 @@ export const TOOL_LABELS: Readonly<Record<Tool, string>> = {
 export interface ToolStyle {
   color: Color;
   size: number;
+  /** Rectangle tool only: fill of new rects (absent = `none`). */
+  fill?: RectFill;
 }
+
+/** Fills the rect controls offer (`solid` exists in the model but has no control). */
+export type RectFill = 'none' | 'tint';
 
 /**
  * Camera: `x`, `y` = image px shown at the canvas's top-left corner; `zoom` = CSS px per image px.
@@ -201,6 +208,10 @@ export interface EditorActions {
   setSize(sizeCss: number): void;
   /** `[` (-1) / `]` (+1): step through `SIZE_STEPS_CSS`. */
   stepSize(direction: -1 | 1): void;
+  /** Fill of the selected rects, or of new rects when nothing is selected. */
+  setRectFill(fill: RectFill): void;
+  /** ⌘D: copy the selection 16 CSS px down-right and select the copies (one undo step). */
+  duplicateSelection(): void;
 
   undo(): void;
   redo(): void;
@@ -381,8 +392,20 @@ export function withShapeSize(s: Shape, px: number): Shape {
   }
 }
 
+/** ⌘D offsets the copies by this much (CSS px), right and down. */
+export const DUPLICATE_OFFSET_CSS = 16;
+
+/** Index of the step nearest `v`. */
+function nearestIndex(steps: readonly number[], v: number): number {
+  let best = 0;
+  for (let i = 1; i < steps.length; i++) {
+    if (Math.abs((steps[i] as number) - v) < Math.abs((steps[best] as number) - v)) best = i;
+  }
+  return best;
+}
+
 /** The tool whose sizes apply to a shape (marker strokes size like the highlighter). */
-function sizeKindOf(s: Shape): ShapeKind {
+export function sizeKindOf(s: Shape): ShapeKind {
   return s.kind === 'pen' && s.marker ? 'highlight' : s.kind;
 }
 
@@ -826,8 +849,11 @@ export const useEditorStore = create<EditorState>()((set, get) => {
       docSync = new DocSync(
         sessionId,
         () => get().doc,
-        (remote) => {
+        (raw) => {
           if (stale()) return;
+          // A tab still on an older build may send an older doc version.
+          const remote = migrateDoc(raw);
+          if (!remote) return;
           const cur = get();
           if (!cur.doc || remote.image.w !== cur.doc.image.w || remote.image.h !== cur.doc.image.h)
             return;
@@ -866,26 +892,26 @@ export const useEditorStore = create<EditorState>()((set, get) => {
       set({ tool, selection: tool === 'select' ? s.selection : [] });
     },
 
+    // With a selection, colour and size edit the selected marks only (one undo step each); with
+    // nothing selected they set the active tool's defaults.
     setColor: (color) => {
       const { tool, styles, selection, doc } = get();
-      let nextStyles = styles;
-      const family = (k: DrawTool) => (k === 'highlight' ? 'highlight' : 'ink');
-      if (tool !== 'select') {
-        const fam = family(tool);
-        const updated = { ...styles };
-        for (const k of Object.keys(updated) as DrawTool[]) {
-          if (family(k) === fam) updated[k] = { ...updated[k], color };
-        }
-        nextStyles = updated;
-      }
-      set({ styles: nextStyles });
       if (doc && selection.length > 0) {
         const sel = new Set(selection);
         const shapes = doc.shapes.map((s) =>
           sel.has(s.id) && s.color !== color ? { ...s, color } : s,
         );
         if (shapes.some((s, i) => s !== doc.shapes[i])) commitShapes(shapes);
+        return;
       }
+      if (tool === 'select') return;
+      const family = (k: DrawTool) => (k === 'highlight' ? 'highlight' : 'ink');
+      const fam = family(tool);
+      const updated = { ...styles };
+      for (const k of Object.keys(updated) as DrawTool[]) {
+        if (family(k) === fam) updated[k] = { ...updated[k], color };
+      }
+      set({ styles: updated });
     },
 
     setColorIndex: (index) => {
@@ -895,32 +921,73 @@ export const useEditorStore = create<EditorState>()((set, get) => {
 
     setSize: (sizeCss) => {
       const { tool, styles, selection, doc, session } = get();
-      if (tool !== 'select')
-        set({ styles: { ...styles, [tool]: { ...styles[tool], size: sizeCss } } });
       if (doc && session && selection.length > 0) {
         const sel = new Set(selection);
-        const px = sizeCss * session.dpr;
-        const shapes = doc.shapes.map((s) => (sel.has(s.id) ? withShapeSize(s, px) : s));
+        const picked = doc.shapes.filter((s) => sel.has(s.id));
+        const first = picked[0];
+        if (!first) return;
+        // The control shows the first mark's scale; other kinds take the same step of theirs.
+        const kind = sizeKindOf(first);
+        const rank = nearestIndex(SIZE_STEPS_CSS[kind], sizeCss);
+        const dpr = session.dpr;
+        const shapes = doc.shapes.map((s) => {
+          if (!sel.has(s.id)) return s;
+          const k = sizeKindOf(s);
+          const css = k === kind ? sizeCss : (SIZE_STEPS_CSS[k][rank] as number);
+          return shapeSize(s) === css * dpr ? s : withShapeSize(s, css * dpr);
+        });
         if (shapes.some((s, i) => s !== doc.shapes[i])) commitShapes(shapes);
+        return;
       }
+      if (tool !== 'select')
+        set({ styles: { ...styles, [tool]: { ...styles[tool], size: sizeCss } } });
     },
 
     stepSize: (direction) => {
       const { tool, styles, selection, doc, session } = get();
-      if (tool !== 'select') {
-        const size = stepSizeValue(SIZE_STEPS_CSS[tool], styles[tool].size, direction);
-        set({ styles: { ...styles, [tool]: { ...styles[tool], size } } });
-      }
       if (doc && session && selection.length > 0) {
         const sel = new Set(selection);
         const dpr = session.dpr;
         const shapes = doc.shapes.map((s) => {
           if (!sel.has(s.id)) return s;
           const css = stepSizeValue(SIZE_STEPS_CSS[sizeKindOf(s)], shapeSize(s) / dpr, direction);
-          return withShapeSize(s, css * dpr);
+          return shapeSize(s) === css * dpr ? s : withShapeSize(s, css * dpr);
         });
-        commitShapes(shapes);
+        if (shapes.some((s, i) => s !== doc.shapes[i])) commitShapes(shapes);
+        return;
       }
+      if (tool !== 'select') {
+        const size = stepSizeValue(SIZE_STEPS_CSS[tool], styles[tool].size, direction);
+        set({ styles: { ...styles, [tool]: { ...styles[tool], size } } });
+      }
+    },
+
+    setRectFill: (fill) => {
+      const { styles, selection, doc } = get();
+      if (doc && selection.length > 0) {
+        const sel = new Set(selection);
+        const shapes = doc.shapes.map((s) =>
+          sel.has(s.id) && s.kind === 'rect' && s.fill !== fill ? { ...s, fill } : s,
+        );
+        if (shapes.some((s, i) => s !== doc.shapes[i])) commitShapes(shapes);
+        return;
+      }
+      set({ styles: { ...styles, rect: { ...styles.rect, fill } } });
+    },
+
+    duplicateSelection: () => {
+      const { doc, selection, session } = get();
+      if (!doc || !session || selection.length === 0) return;
+      const sel = new Set(selection);
+      const d = DUPLICATE_OFFSET_CSS * session.dpr;
+      const copies = doc.shapes
+        .filter((s) => sel.has(s.id))
+        .map((s) => translateShape({ ...s, id: newId() }, d, d));
+      lastNudge = null;
+      commitShapes(
+        [...doc.shapes, ...copies],
+        copies.map((c) => c.id),
+      );
     },
 
     undo: () => {
@@ -940,7 +1007,8 @@ export const useEditorStore = create<EditorState>()((set, get) => {
     selectAll: () => {
       const doc = get().doc;
       if (!doc || doc.shapes.length === 0) return;
-      set({ tool: 'select', selection: doc.shapes.map((s) => s.id) });
+      // The tool stays: marks can be edited with any tool.
+      set({ selection: doc.shapes.map((s) => s.id) });
     },
     clearSelection: () => {
       if (get().selection.length > 0) set({ selection: [] });
@@ -1139,6 +1207,12 @@ if (import.meta.env.MODE === 'e2e' && typeof window !== 'undefined') {
     perf,
     flushAutosave,
     plan: (request: CopyRequest) => store.getState()._engine._planCopy(request),
+    /** Handles of a shape as shown at the current zoom (image px). */
+    handles: (id: string) => {
+      const s = store.getState();
+      const sh = s.doc?.shapes.find((x) => x.id === id);
+      return sh ? interactiveHandles(sh, s.camera.zoom) : [];
+    },
     /** Base64 of the cached/rendered PNG the copy would use (copy resolution). */
     exportCopyPng: async (request: CopyRequest) => {
       const s = store.getState();

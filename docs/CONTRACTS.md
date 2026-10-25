@@ -698,3 +698,104 @@ All replaced in Phase 1 (commit a6dbfdd); the table is kept for history.
 | `src/editor/engine/store.ts` | B | Contract and stub: simple setters work; init, undo/redo, copy, download and camera are no-ops |
 | `src/editor/engine/EditorCanvas.tsx`, `shortcuts.ts` | B | Stubs |
 | `src/editor/App.tsx`, `src/entrypoints/options/main.tsx`, `src/styles/app.css`, `public/icon/*` | C | Placeholders |
+
+- **§8 log, 2026-10-25, engine + UI, direct manipulation** (affects: anyone reading docs or the store;
+  storage shape changed with a migration).
+  - **`annotations.ts`: `DOC_VERSION` 1 → 2.** `rect`, `text` and `pen` gain optional
+    `rotation` (radians, clockwise on screen, about the centre of the shape's frame; absent = 0).
+    `arrow.bend` is now used: the signed offset of the quadratic control point from the chord
+    midpoint along the normal `(-uy, ux)`; the curve passes through midpoint + normal × bend/2
+    (the bend handle). `text.maxW` now wraps (word wrap, long words break), and the text box is
+    then `maxW` wide. `migrateDoc` turns a v1 doc into v2 by re-stamping `v` (every v1 doc is a
+    valid v2 doc); unknown versions still return `null`. Docs from other tabs (`DocSync`) also
+    go through `migrateDoc`.
+  - **Interaction, any tool:** hover over a mark shows a 1 px focus-blue outline (60%) and the
+    `move` cursor; a press on a mark selects it and drags it (Shift-click toggles it in the
+    selection); the tool doesn't change. A press on empty page deselects and draws, as before.
+    Hollow rects hit only on their border. **Alt rule:** Alt + press on an unselected mark draws
+    on top of it; Alt-drag of a selected mark duplicates the selection. Handles: arrows have
+    endpoints + a bend handle; underline/highlight endpoints (free, Shift 15°, soft snap to the
+    axes within 2°); rects 8 resize handles (local frame, Shift aspect, Alt from centre) +
+    rotation; text corners scale the font, sides set `maxW`, + rotation; pens corner scale +
+    rotation; multi-selection a group box with proportional corner scale (no group rotation).
+    Frames and handles sit on the outer edge of the ink (a rect's handles on the stroke's outer
+    edge). A click on a handle without moving changes nothing; a dragged handle keeps its grab
+    offset. One undo step per gesture.
+  - **Store (`store.ts`), behaviour changes:** with a selection, `setColor` / `setSize` /
+    `stepSize` (keys 1–8, `[` `]`, toolbar) edit **only the selected marks** (one undo step)
+    and no longer touch the tool defaults; with nothing selected they set the tool defaults.
+    `setSize` on a mixed selection applies the same step index to each kind. `selectAll()` keeps
+    the active tool (it used to switch to `select`). `setTool(drawTool)` still clears the
+    selection.
+  - **Store additions:** `actions.setRectFill('none' | 'tint')` (selected rects, or the Rectangle
+    tool's default via the new optional `ToolStyle.fill`), `actions.duplicateSelection()` (⌘D,
+    +16 CSS px right and down, copies selected), types `RectFill`, exported `sizeKindOf`,
+    `DUPLICATE_OFFSET_CSS`. E2E-only hooks: `__pagesnapEngine.handles(id)` (handles shown at the
+    current zoom, image px) and `__pagesnapEngine.hover()` (the hovered mark's id).
+  - **Keys:** ⌘D duplicates the selection (only with a selection; otherwise the browser keeps
+    it), `Enter` edits a single selected text, ⌘A selects all without changing the tool.
+    Options page key list and README "Use" updated.
+  - **Toolbar:** the colour well and size control show the selection's values whenever
+    something is selected (any tool); the size menu shows "No fill / Tinted fill" for rects.
+  - **Geometry (`geometry.ts`):** `shapeBounds`/`hitShape`/`hitTestShapes` use rotated and
+    curved geometry (so the copy scope covers rotated and bent marks); `hitTestShapes`
+    prefilters on cached bounds (≈0.02 ms per pointermove with 200 marks). Highlight bands now
+    hit-test as butt-capped rectangles (they used to reach past their ends). New: `shapeFrame`,
+    `shapeCenter`, `shapeRotation`, `withRotation`, `arrowControl`, `arrowMidpoint`,
+    `arrowShaft`, `interactiveHandles`, `rotateHandlePoint`, `scaleShape`, `groupScale`,
+    `shapeOutline`. `resizeBox(box, h, p, { aspect, center })` and
+    `dragHandle(s, h, p, { shift, alt, zoom, start })` take option objects now.
+  - **Tests:** `tests/unit/engine.direct.test.ts`, `tests/browser/engine.direct.test.ts`,
+    `tests/e2e/engine.direct.spec.ts`; `tests/e2e/engine.direct.shots.spec.ts` writes QA
+    screenshots when `PAGESNAP_QA_DIR` is set (skipped otherwise). New fixture
+    `tests/fixtures/pages/article.html` (a light ~1400 CSS px article page, no network).
+
+- **2026-10-25, A (capture), capture-progress popup; the toolbar click no longer cancels**
+  (affects: C's editor copy, the e2e harness docs; `shared/` changes are comment-only).
+  - **Trigger:** the manifest now has `action.default_popup: popup.html` (WXT entrypoint
+    `src/entrypoints/popup/`, vanilla TS, about 8 KB of JS plus a 10 KB shared chunk, no
+    React). A toolbar click and Alt+Shift+P (`_execute_action`) open the popup. The popup
+    connects a port `pagesnap/popup` (`capture/popupProtocol.ts`) and sends `open {tabId}`, and
+    the SW calls `requestCapture(tab)`. The e2e `clickAction(tabId)` calls the same function.
+    `action.onClicked` is no longer used (Chrome doesn't fire it when there's a popup). The
+    context menu calls `action.openPopup({ windowId })` (Chrome 127+). Without a popup it
+    starts the capture directly, with the badge only. If a popup opened but never asked within
+    1.5 s, it starts anyway.
+  - **Semantics:** asking again while this tab's capture runs **joins** it (it resolves with the
+    running id); it never cancels, and the 800 ms double-click guard is gone. Cancelling is now
+    explicit: Esc in the popup (`MESSAGES.escape`) or its Stop button
+    (`MESSAGES.stopped` = "You pressed Stop, so the capture stopped early.").
+    `MESSAGES.toolbar` ("You clicked Page Snap again…") is gone. Esc in the page still cancels
+    as before. Closing the popup only drops its port: the capture and the badge carry on.
+    Another tab's request still queues; a queued tab's popup shows "Waiting for the other
+    capture…", and Esc there drops the queued request (`cancelQueued`).
+  - **Outcome with a popup open** (`CaptureJob.handOff`): "stopped" (partial) holds 700 ms and
+    "visible area only" holds 1400 ms before the editor opens, so the popup can be read. With
+    nothing captured (`status: 'error'`) **no editor opens**: the popup keeps the explanation
+    (a user stop with nothing captured closes itself after about 1 s). With no popup open,
+    everything is as before. The popup closes itself on `done`, and Chrome also closes it when
+    the editor tab takes focus.
+  - **Progress feed:** `capture/progress.ts` keeps one `PopupState` per tab (phase, done/total,
+    page size, stored-slice geometry and crop, median cadence) and posts it on change, at most
+    once per task. The popup reads slice PNGs from IDB itself (`getSliceBlob`) and decodes them
+    at thumbnail size with `createImageBitmap(…, { resizeWidth, resizeHeight })`. The SW does
+    no image work, and with the popup open the measured gaps stayed at 530–536 ms.
+  - **Focus and visibility:** the popup takes keyboard focus. Nothing in the capture listens to
+    window blur or focus: the agent watches `visibilitychange`, trusted Esc keydowns and
+    pagehide, and the SW watches `windows.state === 'minimized'`. An e2e test runs a whole
+    capture under Chrome's real popup (`action.openPopup()` headless): the result is `ready`,
+    8000 px tall, cadence normal, and the page is restored.
+  - **Test hooks (A-owned `__pagesnapCapture`):** `viewers()`, `progress(tabId)`, `popupPerf()`;
+    `testFlags` gains `failVisibleShot`, `stepDelayMs` and `finalizeDelayMs`. `cancel()` is
+    now Stop. `shared/e2e.ts`: the `clickAction` doc comment now describes "start or join"
+    (no type change). In e2e, `popup.html?tab=<id>` shows the popup for any tab in an
+    ordinary tab or window.
+  - **Tests touched outside `capture.*`/`popup.*`:** `shared.smoke.spec.ts` now expects
+    `popup.html` (it expected no popup). `flow.command.spec.ts`: "pressing Alt+Shift+P again
+    mid-capture does not cancel it" (`ready`, 8000 px). `capture.abort.spec.ts`: the toolbar
+    cancel test is now "Stop in the popup cancels a capture". New `tests/e2e/popup.spec.ts`
+    and `tests/unit/capture.progress.test.ts`.
+  - **For C (not changed by A):** `editor/ui/messages.ts` `ABORTED_BY_USER` fallback body still
+    says "with Esc or a second click on Page Snap"; it should now say "with Esc or Stop".
+    `StageStates.tsx` "click Page Snap in the toolbar" stays correct. README: the toolbar
+    click opens a progress popup, and Esc or Stop there cancels (the orchestrator updates it).

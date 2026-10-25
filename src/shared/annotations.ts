@@ -13,7 +13,11 @@
  */
 import type { Point, Rect, SessionId, Size } from './types';
 
-export const DOC_VERSION = 1;
+/**
+ * v2 (2026-10-25): optional `rotation` on rect, text and pen; arrows may be bent (`bend`). A v1 doc
+ * is a valid v2 doc (absent rotation = 0), so the migration only re-stamps `v`.
+ */
+export const DOC_VERSION = 2;
 
 /** Shape id, `newId()` from `ids.ts`. */
 export type ShapeId = string;
@@ -28,14 +32,18 @@ interface ShapeBase {
   shadow: boolean;
 }
 
-/** Straight arrow from `a` to `b`. */
+/** Arrow from `a` to `b`, straight or bent into a quadratic curve. */
 export interface ArrowShape extends ShapeBase {
   kind: 'arrow';
   a: Point;
   b: Point;
   /** Stroke width, image px. */
   width: number;
-  /** Signed perpendicular offset of a quadratic control point, image px. 0 = straight (v0.1 always 0). */
+  /**
+   * Signed offset of the quadratic control point from the chord midpoint, along the chord's
+   * normal `(-uy, ux)` (u = unit a→b), image px. 0 = straight. The curve itself passes through
+   * the midpoint moved by `bend / 2`, which is where the bend handle sits.
+   */
   bend: number;
   heads: 'end' | 'both';
 }
@@ -48,6 +56,8 @@ export interface RectShape extends ShapeBase {
   width: number;
   /** `tint` = the same colour at 0.15 alpha. */
   fill: 'none' | 'tint' | 'solid';
+  /** Radians, clockwise on screen, about the box centre. Absent = 0 (v2). */
+  rotation?: number;
 }
 
 /** Underline from `a` to `b` (horizontal unless drawn with Shift). Square caps. */
@@ -78,6 +88,8 @@ export interface PenShape extends ShapeBase {
   size: number;
   /** Marker mode (Shift + highlighter): multiply blend, no thinning. */
   marker: boolean;
+  /** Radians, clockwise on screen, about the centre of the points' bounds. Absent = 0 (v2). */
+  rotation?: number;
 }
 
 export interface TextShape extends ShapeBase {
@@ -88,10 +100,12 @@ export interface TextShape extends ShapeBase {
   /** Font size, image px. */
   size: number;
   weight: 400 | 700;
-  /** Wrap width, image px. Absent = no wrapping. */
+  /** Wrap width, image px (the text box is then this wide). Absent = no wrapping. */
   maxW?: number;
   /** `outline` = white outline behind the glyphs (default); `label` = filled box behind. */
   style: 'outline' | 'label';
+  /** Radians, clockwise on screen, about the centre of the text box. Absent = 0 (v2). */
+  rotation?: number;
 }
 
 export type Shape = ArrowShape | RectShape | UnderlineShape | HighlightShape | PenShape | TextShape;
@@ -139,10 +153,11 @@ export function emptyDoc(sessionId: SessionId, image: Size & { dpr: number }): A
  */
 export function migrateDoc(raw: unknown): AnnotationDoc | null {
   if (typeof raw !== 'object' || raw === null) return null;
-  const doc = raw as Partial<AnnotationDoc>;
-  if (doc.v === DOC_VERSION && Array.isArray(doc.shapes) && typeof doc.sessionId === 'string') {
-    return doc as AnnotationDoc;
-  }
+  const doc = raw as Partial<Omit<AnnotationDoc, 'v'>> & { v?: unknown };
+  if (!Array.isArray(doc.shapes) || typeof doc.sessionId !== 'string') return null;
+  // v1 → v2: rotation and bend are optional/additive, so a v1 doc is already a valid v2 doc.
+  if (doc.v === 1) return { ...(doc as AnnotationDoc), v: DOC_VERSION };
+  if (doc.v === DOC_VERSION) return doc as AnnotationDoc;
   return null;
 }
 

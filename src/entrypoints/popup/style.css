@@ -1,0 +1,422 @@
+/*
+ * Capture popup (owner: A). Same graphite tokens and system face as the editor chrome
+ * (src/styles/app.css), copied rather than imported so the popup doesn't pull Tailwind and paints
+ * at once. One surface, hairlines, no cards; the only motion is the page developing and the bar.
+ */
+:root {
+  color-scheme: dark light;
+  --bg: #1b1b1d;
+  --ink: #ededee;
+  --ink-2: rgb(237 237 238 / 0.7);
+  --ink-3: rgb(237 237 238 / 0.5);
+  --ink-4: rgb(237 237 238 / 0.24);
+  --line: rgb(255 255 255 / 0.08);
+  --hover: rgb(255 255 255 / 0.08);
+  --press: rgb(255 255 255 / 0.13);
+  --track: rgb(255 255 255 / 0.1);
+  --mini: #26262a;
+  --mini-rim: rgb(255 255 255 / 0.1);
+  --ghost: rgb(255 255 255 / 0.07);
+  --ghost-rim: rgb(255 255 255 / 0.12);
+  --focus: #3d8bff;
+  --warn: #e3a33b;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f7f7f8;
+    --ink: #1b1b1d;
+    --ink-2: rgb(27 27 29 / 0.68);
+    --ink-3: rgb(27 27 29 / 0.58);
+    --ink-4: rgb(27 27 29 / 0.3);
+    --line: rgb(0 0 0 / 0.1);
+    --hover: rgb(0 0 0 / 0.055);
+    --press: rgb(0 0 0 / 0.09);
+    --track: rgb(0 0 0 / 0.1);
+    --mini: #ececee;
+    --mini-rim: rgb(0 0 0 / 0.1);
+    --ghost: rgb(255 255 255 / 0.55);
+    --ghost-rim: rgb(0 0 0 / 0.08);
+    --focus: #0a6cff;
+    --warn: #9a6414;
+  }
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+}
+
+body {
+  width: 320px;
+  color: var(--ink);
+  font: 13px / 1.4 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+p {
+  margin: 0;
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ layout */
+
+.p {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  column-gap: 16px;
+  height: 136px;
+  padding: 16px 16px 16px 16px;
+}
+
+.info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 18px;
+}
+
+.phase {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pct {
+  margin-top: 2px;
+  color: var(--ink);
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 34px;
+  letter-spacing: -0.03em;
+}
+.pct-u {
+  margin-left: 0;
+  color: var(--ink-3);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.page {
+  margin-top: auto;
+}
+.title,
+.host {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.title {
+  color: var(--ink);
+  font-weight: 500;
+  line-height: 18px;
+}
+.host {
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.bar {
+  position: relative;
+  height: 2px;
+  margin-top: 10px;
+  overflow: hidden;
+  border-radius: 1px;
+  background: var(--track);
+}
+.bar > i {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--ink-2);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  will-change: transform;
+}
+
+.meta {
+  margin-top: 8px;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ------------------------------------------------------------------ action */
+
+kbd {
+  padding: 0 4px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px var(--ink-4);
+  color: var(--ink-3);
+  font: inherit;
+  font-size: 10px;
+  line-height: 15px;
+  letter-spacing: 0.04em;
+}
+
+.act {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  margin: -2px -5px -2px 0;
+  padding: 0 5px 0 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  transition:
+    background-color 120ms var(--ease),
+    color 120ms var(--ease);
+}
+.act:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.act:hover kbd {
+  box-shadow: inset 0 0 0 1px var(--ink-3);
+  color: var(--ink-2);
+}
+.act:active {
+  background: var(--press);
+}
+.act:focus {
+  outline: none;
+}
+.act:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 0;
+}
+
+/* ------------------------------------------------------------------ miniature */
+
+.mini {
+  position: relative;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--mini);
+}
+/* The rim sits above the slices, so a white page still has an edge. */
+.mini::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--mini-rim);
+  pointer-events: none;
+}
+/* Once the strip scrolls, a short fade says the page continues above. */
+.mini::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 1;
+  height: 12px;
+  background: linear-gradient(var(--mini), transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 240ms var(--ease);
+}
+.mini[data-scrolled]::before {
+  opacity: 1;
+}
+
+.film {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  transition:
+    transform 480ms var(--ease-out),
+    filter 300ms var(--ease),
+    opacity 300ms var(--ease);
+}
+
+.ghost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 0;
+  background: var(--ghost);
+  box-shadow: inset 0 0 0 1px var(--ghost-rim);
+}
+
+.film canvas {
+  position: absolute;
+  display: block;
+  animation: develop 600ms var(--ease) both;
+}
+
+@keyframes develop {
+  from {
+    opacity: 0;
+    filter: saturate(0) brightness(1.25);
+  }
+  to {
+    opacity: 1;
+    filter: none;
+  }
+}
+
+/*
+ * The developing edge, under the newest slice: a dark hairline on the page and a light one on the
+ * ghost below it, so it reads over any content in either scheme.
+ */
+.edge {
+  position: absolute;
+  left: 0;
+  z-index: 1000;
+  width: 100%;
+  height: 2px;
+  top: -1px;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform 480ms var(--ease-out),
+    opacity 240ms var(--ease);
+}
+.edge::before,
+.edge::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+.edge::before {
+  top: 0;
+  background: rgb(0 0 0 / 0.35);
+}
+.edge::after {
+  bottom: 0;
+  background: rgb(255 255 255 / 0.75);
+}
+[data-phase="capturing"] .edge {
+  opacity: 1;
+}
+
+/* ------------------------------------------------------------------ phases */
+
+.msg {
+  display: none;
+}
+
+/* Outcomes with words instead of numbers. */
+[data-phase="failed"] .pct,
+[data-phase="visible"] .pct,
+[data-phase="failed"] .bar,
+[data-phase="visible"] .bar,
+[data-phase="failed"] .meta {
+  display: none;
+}
+[data-phase="failed"] .msg,
+[data-phase="visible"] .msg {
+  display: -webkit-box;
+  max-width: 252px;
+  margin-top: 6px;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 17px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+[data-phase="failed"] .msg {
+  -webkit-line-clamp: 4;
+}
+[data-phase="failed"] .phase,
+[data-phase="visible"] .phase {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+[data-phase="paused"] .phase {
+  color: var(--warn);
+}
+[data-phase="paused"] .pct,
+[data-phase="queued"] .pct {
+  color: var(--ink-3);
+}
+[data-phase="paused"] .film {
+  filter: saturate(0.4);
+  opacity: 0.75;
+}
+[data-phase="stitching"] .bar > i,
+[data-phase="opening"] .bar > i,
+[data-phase="done"] .bar > i {
+  background: var(--ink);
+}
+[data-phase="paused"] .bar > i,
+[data-phase="stopped"] .bar > i {
+  background: var(--ink-4);
+}
+
+.act[data-off] {
+  display: none;
+}
+
+/* Visible-only and failed: the explanation takes the page block's place. */
+[data-phase="failed"] .page,
+[data-phase="visible"] .page {
+  display: none;
+}
+[data-phase="visible"] .meta {
+  margin-top: auto;
+}
+/*
+ * Nothing to show for a page that couldn't be captured: words only, full width, and the panel
+ * shrinks to them (Chrome resizes the popup; this state is reached once, not animated through).
+ */
+[data-phase="failed"] .p {
+  grid-template-columns: minmax(0, 1fr);
+  height: auto;
+  padding-bottom: 18px;
+}
+[data-phase="failed"] .mini {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ reduced motion */
+
+@media (prefers-reduced-motion: reduce) {
+  .film,
+  .edge,
+  .act {
+    transition: none;
+  }
+  .film canvas {
+    animation: none;
+  }
+}

@@ -35,6 +35,15 @@ import { BADGE_PROGRESS, clearBadge, failedBadge, progressText, setBadge } from 
 import { buildLayout, type ColorRun, colorRuns, scrollerBitmapRect } from './layout';
 import { createShooter, type Shooter } from './limiter';
 import { dataUrlToBlob, pngBlobSize } from './png';
+import type { PopupPhase, PopupSlice } from './popupProtocol';
+import {
+  clearProgress,
+  endProgress,
+  hasViewer,
+  recentMedian,
+  resetProgress,
+  setProgress,
+} from './progress';
 import {
   classifyInjectError,
   classifyRestrictedUrl,
@@ -56,6 +65,12 @@ export const testFlags = {
   failFinalSave: false,
   /** Override `PAUSE_LIMIT_MS` (pause tests), ms; 0 = default. */
   pauseLimitMs: 0,
+  /** Make the visible-area screenshot fail too (restricted-page error tests). */
+  failVisibleShot: false,
+  /** Extra delay before each step (slow captures for popup tests), ms. */
+  stepDelayMs: 0,
+  /** Extra delay before the session is made final (popup "Stitching" tests), ms. */
+  finalizeDelayMs: 0,
 };
 
 const WARNING_MESSAGES: Record<CaptureWarningCode, string> = {
@@ -92,7 +107,7 @@ export const MESSAGES = {
   hiddenTooLong:
     'The tab stayed hidden (or its window minimised) for too long, so the capture stopped early.',
   escape: 'You pressed Esc, so the capture stopped early.',
-  toolbar: 'You clicked Page Snap again, so the capture stopped early.',
+  stopped: 'You pressed Stop, so the capture stopped early.',
   resized: 'The window was resized or moved to another screen, so the capture stopped early.',
   pinch: 'The page is pinch-zoomed. Reset the zoom (pinch out) and capture again.',
   failed: 'Chrome refused to take a screenshot of this page.',
@@ -108,10 +123,20 @@ const PAUSE_POLL_MS = 250;
 export const PAUSED_BADGE = 'II';
 /** Badge text while waiting for a loading page or for the running capture (queued tab). */
 export const WAITING_BADGE = '…';
+/**
+ * With a popup open, how long it shows the outcome before the editor tab (which closes it) opens:
+ * long enough to read "Stopped · opening what was captured" or why only the visible area was
+ * captured. No delay when nobody is watching.
+ */
+export const POPUP_HOLD_MS = { stopped: 700, visible: 1400 } as const;
 
 let active: CaptureJob | null = null;
 /** A capture requested for another tab while one runs: starts when the running one ends. */
-let queued: { tab: Tab; resolve: (id: SessionId | null) => void } | null = null;
+let queued: {
+  tab: Tab;
+  promise: Promise<SessionId | null>;
+  resolve: (id: SessionId | null) => void;
+} | null = null;
 
 export function activeCaptureId(): SessionId | null {
   return active?.id ?? null;
@@ -149,12 +174,34 @@ export async function startCapture(tab: Tab): Promise<SessionId> {
 export function queueCapture(tab: Tab): Promise<SessionId | null> {
   if (!active) return startCapture(tab);
   const prev = queued;
-  if (prev && prev.tab.id !== tab.id && prev.tab.id != null) void clearBadge(prev.tab.id);
+  // The same tab again (its popup reopened): keep its place.
+  if (prev && prev.tab.id === tab.id) return prev.promise;
+  if (prev && prev.tab.id != null) {
+    void clearBadge(prev.tab.id);
+    clearProgress(prev.tab.id);
+  }
   prev?.resolve(null);
-  if (tab.id != null) void setBadge(tab.id, WAITING_BADGE);
-  return new Promise((resolve) => {
-    queued = { tab, resolve };
+  if (tab.id != null) {
+    void setBadge(tab.id, WAITING_BADGE);
+    resetProgress(tab.id, { phase: 'queued', title: tab.title ?? '', url: tab.url ?? '' });
+  }
+  let resolve: (id: SessionId | null) => void = () => {};
+  const promise = new Promise<SessionId | null>((r) => {
+    resolve = r;
   });
+  queued = { tab, promise, resolve };
+  return promise;
+}
+
+/** Drop the queued capture of `tabId` (Esc or Stop in its popup). Returns whether one was queued. */
+export function cancelQueued(tabId: number): boolean {
+  const q = queued;
+  if (!q || q.tab.id !== tabId) return false;
+  queued = null;
+  void clearBadge(tabId);
+  endProgress(tabId, { phase: 'failed', code: 'ABORTED_BY_USER', message: null });
+  q.resolve(null);
+  return true;
 }
 
 function startQueued(): void {
@@ -170,12 +217,12 @@ function startQueued(): void {
 }
 
 /**
- * Stop the running capture early (toolbar click on its tab during a capture). Returns whether
- * one ran.
+ * Stop the running capture early: Esc or Stop in the popup (`how`). A toolbar click no longer
+ * cancels; it reopens the popup. Returns whether one ran.
  */
-export function cancelCapture(): boolean {
+export function cancelCapture(how: 'esc' | 'button' = 'button'): boolean {
   if (!active) return false;
-  active.fail(stop('ABORTED_BY_USER', MESSAGES.toolbar));
+  active.fail(stop('ABORTED_BY_USER', how === 'esc' ? MESSAGES.escape : MESSAGES.stopped));
   return true;
 }
 
@@ -241,6 +288,11 @@ class CaptureJob {
   private truncatedLate = false;
   private retakes = 0;
   private heartbeat: ReturnType<typeof setInterval> | undefined;
+  /** What the popup's miniature needs about each stored slice. */
+  private readonly popupSlices: PopupSlice[] = [];
+  /** Content size of the page being captured, CSS px (capped at the length limit). */
+  private pageSize: { w: number; h: number } | null = null;
+  private maxCssH = Number.POSITIVE_INFINITY;
 
   constructor(
     private readonly tab: Tab,
@@ -297,6 +349,12 @@ class CaptureJob {
 
   async run(): Promise<SessionId> {
     const t0 = performance.now();
+    resetProgress(this.tabId, {
+      sessionId: this.id,
+      phase: 'preparing',
+      title: this.session.title,
+      url: this.session.url,
+    });
     try {
       await this.save();
     } catch (err) {
@@ -316,7 +374,9 @@ class CaptureJob {
       } catch (err) {
         this.fail(err instanceof Stop ? err : stop('INTERNAL', `Capture failed: ${errText(err)}`));
       }
+      if (!this.stopped) setProgress(this.tabId, { phase: 'stitching' });
       await this.release();
+      if (testFlags.finalizeDelayMs > 0) await sleep(testFlags.finalizeDelayMs);
       const tf = performance.now();
       await this.finalize();
       this.timings.finalizeMs = Math.round(performance.now() - tf);
@@ -325,7 +385,7 @@ class CaptureJob {
       await browser.storage.session
         .remove([ACTIVE_CAPTURE_KEY, ACTIVE_CAPTURE_TAB_KEY])
         .catch(() => {});
-      editor = await this.openEditor().catch(() => null);
+      editor = await this.handOff();
       await this.finishBadge(editor).catch(() => clearBadge(this.tabId));
     }
     this.timings.totalMs = Math.round(performance.now() - t0);
@@ -391,11 +451,15 @@ class CaptureJob {
     this.session.progress = { done: 0, total: this.estTotal };
     this.timings.prepareMs = Math.round(performance.now() - tp);
     void this.save().catch(() => {});
+    this.maxCssH = opts.maxCssHeight;
+    this.notePageSize(prep.target);
+    setProgress(this.tabId, { phase: 'capturing', total: this.estTotal, page: this.pageSize });
 
     const tc = performance.now();
     // Ask until the agent says `done`, even after the last slice: it may want to take a slice
     // again if the page moved while it was shot.
     for (;;) {
+      if (testFlags.stepDelayMs > 0) await sleep(testFlags.stepDelayMs, this.ac.signal);
       const r = await link.request({ t: 'step' }, 15_000, this.ac.signal);
       this.throwIfStopped();
       if (r.t === 'done') {
@@ -404,6 +468,7 @@ class CaptureJob {
       }
       if (r.t !== 'positioned') throw this.agentError(r);
       this.note(r.notes);
+      this.notePageSize(r.target);
       if (!r.visible) this.setVisible(false);
       await this.shoot(r);
     }
@@ -481,6 +546,7 @@ class CaptureJob {
         if (pausedAt) {
           console.info('[pagesnap] resumed after', Math.round(performance.now() - pausedAt), 'ms');
           void setBadge(this.tabId, progressText(this.slices.length, this.estTotal));
+          setProgress(this.tabId, { phase: 'capturing' });
         }
         return pausedAt > 0;
       }
@@ -492,6 +558,7 @@ class CaptureJob {
           visible: this.pageVisible,
         });
         void setBadge(this.tabId, PAUSED_BADGE, BADGE_PROGRESS);
+        setProgress(this.tabId, { phase: 'paused' });
       } else if (performance.now() - pausedAt > (testFlags.pauseLimitMs || PAUSE_LIMIT_MS)) {
         throw stop('TAB_CHANGED', MESSAGES.hiddenTooLong);
       }
@@ -540,6 +607,7 @@ class CaptureJob {
       this.persisted = Math.max(this.persisted, index + 1);
       this.session.slices = this.slices.slice(0, this.persisted);
       this.session.progress = { done: this.persisted, total: progress.total };
+      this.reportSlice(meta);
       await this.save().catch((err: unknown) => console.warn('[pagesnap] session write', err));
     });
   }
@@ -551,6 +619,7 @@ class CaptureJob {
     let dataUrl: string;
     try {
       await this.waitShootable();
+      if (testFlags.failVisibleShot) throw new Error('Cannot access contents of the page (test)');
       dataUrl = await this.shooter.shoot(this.ac.signal);
     } catch (err) {
       if (err instanceof Stop) throw err;
@@ -686,6 +755,89 @@ class CaptureJob {
       left: r.x > 0 ? colorRuns(row.subarray(0, r.x * 4), r.x, 0) : [],
       right: right0 < w ? colorRuns(row.subarray(right0 * 4), w - right0, right0) : [],
     };
+  }
+
+  /** Track the size of the page being assembled (it can grow), capped at the length limit. */
+  private notePageSize(target: TargetGeometry): void {
+    const w = Math.max(1, target.content.w - target.range.x0);
+    const h = Math.max(1, Math.min(target.content.h - target.range.y0, this.maxCssH));
+    if (this.pageSize?.w === w && this.pageSize.h === h) return;
+    this.pageSize = { w, h };
+  }
+
+  /** A slice is stored: tell the popup where it goes and which part of the PNG to show. */
+  private reportSlice(meta: SliceMeta): void {
+    const t = meta.target;
+    const at = meta.place ?? meta.scroll;
+    const scale = this.scale || meta.bitmap.w / Math.max(1, this.viewportW);
+    const r = t.clientRect;
+    const cx = Math.max(0, Math.round(r.x * scale));
+    const cy = Math.max(0, Math.round(r.y * scale));
+    const crop = {
+      x: cx,
+      y: cy,
+      w: Math.max(1, Math.min(meta.bitmap.w - cx, Math.round(r.w * scale))),
+      h: Math.max(1, Math.min(meta.bitmap.h - cy, Math.round(r.h * scale))),
+    };
+    const prev = this.popupSlices[meta.index];
+    this.popupSlices[meta.index] = {
+      i: meta.index,
+      v: (prev?.v ?? 0) + (prev ? 1 : 0),
+      x: at.x - t.range.x0,
+      y: at.y - t.range.y0,
+      w: r.w,
+      h: r.h,
+      crop,
+    };
+    const bottom = at.y - t.range.y0 + r.h;
+    const page = this.pageSize ?? { w: r.w, h: bottom };
+    if (bottom > page.h) this.pageSize = { w: page.w, h: Math.min(bottom, this.maxCssH) };
+    setProgress(this.tabId, {
+      done: this.persisted,
+      total: Math.max(this.estTotal, this.persisted),
+      page: this.pageSize ?? page,
+      slices: this.popupSlices.slice(0, this.persisted).filter(Boolean),
+      cadenceMs: recentMedian(this.timings.frameGapsMs),
+      lastSliceAt: Date.now(),
+    });
+  }
+
+  /**
+   * Tell the popup how it ended, then open the editor. With a popup open: hold a moment on
+   * "stopped" / "visible area only" so it can be read, and when nothing was captured keep the
+   * explanation in the popup instead of opening an editor that only repeats it.
+   */
+  private async handOff(): Promise<Tab | null> {
+    const s = this.session;
+    const outcome: PopupPhase =
+      s.status === 'error'
+        ? 'failed'
+        : s.status === 'partial'
+          ? 'stopped'
+          : s.mode === 'visible'
+            ? 'visible'
+            : 'opening';
+    const message =
+      outcome === 'visible'
+        ? (s.warnings.find((w) => w.code === 'VISIBLE_ONLY')?.message ?? null)
+        : (s.error?.message ?? null);
+    setProgress(this.tabId, {
+      phase: outcome,
+      message,
+      code: s.error?.code ?? null,
+      done: s.slices.length,
+      total: Math.max(s.slices.length, outcome === 'opening' ? s.slices.length : this.estTotal),
+    });
+    const watched = hasViewer(this.tabId);
+    if (watched && outcome === 'failed') {
+      endProgress(this.tabId, {});
+      return null;
+    }
+    const hold = outcome === 'stopped' || outcome === 'visible' ? POPUP_HOLD_MS[outcome] : 0;
+    if (watched && hold) await sleep(hold);
+    const editor = await this.openEditor().catch(() => null);
+    endProgress(this.tabId, editor ? { phase: 'done' } : {});
+    return editor;
   }
 
   private async openEditor(): Promise<Tab | null> {
