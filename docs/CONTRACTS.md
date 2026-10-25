@@ -644,6 +644,15 @@ Log:
     (`capture/retention.ts`), run after every capture, on SW start (throttled to 10 min) and on
     browser start.
 
+- **2026-10-25, website, embedding seam: `setEditorKeyFilter`** (affects: B's `shortcuts.ts` and
+  `controller.ts`; additive, no behaviour change in the extension). The website demo (`site/`)
+  runs the real editor next to other page content, so the editor's window-level keys (Space,
+  arrows, single-key tools, ⌘C) must only fire while the demo is in use.
+  `setEditorKeyFilter(fn | null)` (exported from `@/editor/engine`) installs a predicate;
+  `handleEditorKey` and the controller's keydown handler return early when it says no. Key-ups
+  always pass, so a held Space or modifier can't stick. With no filter (the extension never sets
+  one), `editorOwnsKey` is always true. Covered by `tests/unit/engine.keyfilter.test.ts`.
+
 ## 9. Decisions made in Phase 0
 
 1. **The agent is a WXT unlisted script** (`src/entrypoints/agent.ts` → `/agent.js`), not a

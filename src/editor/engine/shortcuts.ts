@@ -100,9 +100,28 @@ function navigationKey(e: KeyboardEvent, key: string): boolean {
   }
 }
 
+/**
+ * Embedding seam: decides whether a window-level key event belongs to the editor. The extension's
+ * editor tab never sets one (every key is the editor's); a page that embeds the editor next to
+ * other content (the website demo) sets one so Space, arrows and ⌘C keep working elsewhere.
+ */
+export type EditorKeyFilter = (e: KeyboardEvent) => boolean;
+let keyFilter: EditorKeyFilter | null = null;
+
+/** Install (or clear with `null`) the embedding key filter. */
+export function setEditorKeyFilter(filter: EditorKeyFilter | null): void {
+  keyFilter = filter;
+}
+
+/** Does this key event belong to the editor? Always true unless an embedder set a filter. */
+export function editorOwnsKey(e: KeyboardEvent): boolean {
+  return keyFilter ? keyFilter(e) : true;
+}
+
 /** Handle one keydown. Returns true when it was an editor shortcut (and was prevented). */
 export function handleEditorKey(e: KeyboardEvent): boolean {
   if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return false;
+  if (!editorOwnsKey(e)) return false;
   const s = useEditorStore.getState();
   // Typing (our text overlay or any field C renders): let the field have every key, so ⌘C/⌘Z/⌘A
   // behave natively there.

@@ -49,7 +49,7 @@ import {
   zoomLimits,
 } from './geometry';
 import { type Draft, Renderer } from './renderer';
-import { isInteractiveTarget, pageBy } from './shortcuts';
+import { editorOwnsKey, isInteractiveTarget, pageBy } from './shortcuts';
 import { type DrawTool, type EditorState, useEditorStore } from './store';
 
 /** Below this on-screen length (CSS px) a drag is a click: no shape is created. */
@@ -1084,6 +1084,8 @@ export class CanvasController {
   }
 
   private onKey(e: KeyboardEvent, down: boolean): void {
+    // Key-ups always pass, so a held Space or modifier can't get stuck when the filter flips.
+    if (down && !editorOwnsKey(e)) return;
     if (e.code !== 'Space' && e.key !== ' ') {
       if (down && e.key === 'Escape' && this.gesture && !isTypingTarget(e.target)) {
         // Esc cancels the gesture in progress (before the global shortcut sees it).
