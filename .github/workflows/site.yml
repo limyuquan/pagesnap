@@ -1,8 +1,7 @@
 # Builds the website (site/) and publishes it to GitHub Pages.
 #
-# Not active yet: it only runs when started by hand (Actions → "Website" → Run workflow), and
-# Pages must first be switched on in the repo settings (Settings → Pages → Source: GitHub
-# Actions). To deploy on every push to main once that's approved, uncomment the `push` trigger.
+# Runs on pushes to main that touch the site or the editor code it embeds, and by hand
+# (Actions → "Website" → Run workflow). Pages is set to "Source: GitHub Actions".
 #
 # SITE_BASE is the path the site is served under: `/pagesnap/` for
 # https://limyuquan.github.io/pagesnap/, or `/` with a custom domain (then also set SITE_URL and
@@ -11,9 +10,9 @@ name: Website
 
 on:
   workflow_dispatch:
-  # push:
-  #   branches: [main]
-  #   paths: [site/**, src/editor/**, src/shared/**, src/compositor/**, src/styles/**, public/icon/**]
+  push:
+    branches: [main]
+    paths: [site/**, src/editor/**, src/shared/**, src/compositor/**, src/styles/**, public/icon/**]
 
 permissions:
   contents: read
