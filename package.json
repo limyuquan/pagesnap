@@ -14,7 +14,7 @@
     "build": "wxt build",
     "build:e2e": "wxt build --mode e2e",
     "zip": "wxt zip",
-    "typecheck": "wxt prepare && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "typecheck": "wxt prepare && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p site/tsconfig.json",
     "lint": "biome check .",
     "format": "biome check --write .",
     "test": "vitest run",
@@ -23,6 +23,10 @@
     "test:e2e": "pnpm build:e2e && playwright test",
     "test:e2e:cft": "pnpm build:e2e && PAGESNAP_BROWSER=cft playwright test",
     "check": "pnpm typecheck && pnpm lint && pnpm test",
+    "site:dev": "vite --config site/vite.config.ts",
+    "site:build": "vite build --config site/vite.config.ts",
+    "site:preview": "vite preview --config site/vite.config.ts",
+    "site:render": "node site/scripts/render-demo-page.mjs",
     "postinstall": "wxt prepare"
   },
   "dependencies": {

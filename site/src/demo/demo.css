@@ -1,0 +1,347 @@
+/*
+ * The demo: a browser window around the extension's real editor. The editor's own stylesheet is
+ * imported as-is into the `editor` layer (declared first in site.css), so it styles the editor
+ * exactly as in the extension and can't override the site around it.
+ */
+@import "../../../src/styles/app.css" layer(editor);
+@source "../../../src/editor";
+
+.dm[data-capturing] .dm-page {
+  overflow: hidden;
+}
+.dm-ed {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  background: var(--ps-surround);
+  color: var(--ps-ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.dm-ed .ps-bar {
+  height: var(--ps-bar-h);
+}
+
+/* Phone bar: tools on top, history and output below, touch-sized. */
+.dm-cbar {
+  display: grid;
+  gap: 2px;
+  padding: 6px 6px 4px;
+  background: var(--ps-chrome);
+  box-shadow: 0 1px 0 var(--ps-line);
+}
+.dm-cbar-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.dm-cbar-gap {
+  flex: 1;
+}
+.dm-cbar .ps-btn {
+  width: 36px;
+  height: 38px;
+}
+@container demo (max-width: 340px) {
+  .dm-cbar .ps-btn {
+    width: 32px;
+  }
+}
+.dm-cbar .ps-tbtn {
+  height: 38px;
+}
+.dm-cbar .ps-primary {
+  height: 36px;
+  min-width: 76px;
+}
+.dm-cbar .ps-copy-kbd,
+.dm-cbar .ps-size-num {
+  display: none;
+}
+
+/* Hint ring around the thing the current suggestion is about. */
+.dm-ring {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  border-radius: 10px;
+  box-shadow:
+    0 0 0 2px rgb(255 59 48 / 0.9),
+    0 0 0 6px rgb(255 59 48 / 0.18);
+  pointer-events: none;
+  animation: dm-breathe 2.4s var(--ease) infinite;
+}
+@keyframes dm-breathe {
+  50% {
+    box-shadow:
+      0 0 0 2px rgb(255 59 48 / 0.55),
+      0 0 0 10px rgb(255 59 48 / 0.08);
+  }
+}
+
+/* The editor's toast is a single line in its own wide tab; in a phone frame it wraps. */
+.dm[data-layout="phone"] .ps-toast,
+.dm[data-layout="phone"] .ps-hint {
+  max-width: min(330px, calc(100vw - 64px));
+  white-space: normal;
+}
+
+/* Capture panel, hanging under the toolbar icon like Chrome's popup. */
+.dm-pop {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 20;
+  animation: dm-drop 180ms var(--ease-out);
+}
+@keyframes dm-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+/* First-run coach mark under the icon. */
+.dm-coach {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  z-index: 10;
+  padding: 7px 11px;
+  border-radius: 8px;
+  background: #1c1c1e;
+  box-shadow: 0 8px 24px -8px rgb(0 0 0 / 0.5);
+  color: #f2f2f3;
+  font-size: 13px;
+  pointer-events: none;
+  animation: dm-drop 400ms 700ms var(--ease-out) both;
+}
+.dm-coach::before {
+  content: "";
+  position: absolute;
+  top: -5px;
+  right: 18px;
+  width: 10px;
+  height: 10px;
+  background: inherit;
+  transform: rotate(45deg);
+  border-radius: 2px;
+}
+
+/* Touch: a finger on an inactive capture scrolls the page; a tap starts drawing. */
+.dm-shield {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  display: grid;
+  place-items: end center;
+  padding-bottom: 24px;
+  border: 0;
+  background: transparent;
+  touch-action: pan-y;
+  cursor: pointer;
+}
+.dm-shield span {
+  padding: 8px 14px;
+  border-radius: 99px;
+  background: #1c1c1e;
+  color: #f2f2f3;
+  font-size: 14px;
+  box-shadow: 0 8px 24px -8px rgb(0 0 0 / 0.5);
+}
+
+/* ------------------------------------------------------------------ under the frame */
+
+.dm-under {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px 20px;
+  align-items: start;
+  margin-top: 20px;
+}
+.dm-hint {
+  margin: 0;
+  min-height: 1.55em;
+  color: var(--ink);
+  font-size: 16px;
+  letter-spacing: -0.01em;
+}
+.dm-steps {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dm-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 11px 0 6px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink-3);
+  font-size: 13.5px;
+  transition:
+    color 200ms var(--ease),
+    box-shadow 200ms var(--ease);
+}
+.dm-step:not(:has(kbd)) {
+  padding-left: 11px;
+}
+.dm-step kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  border-radius: 5px;
+  background: var(--bg-3);
+  color: var(--ink-2);
+  font-size: 11.5px;
+}
+.dm-step[data-done] {
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.dm-step[data-done] kbd {
+  background: var(--red);
+  color: #fff;
+}
+.dm-step[data-done] > span:first-of-type {
+  text-decoration: line-through;
+  text-decoration-color: var(--red);
+  text-decoration-thickness: 2px;
+}
+.dm-reset {
+  grid-column: 2;
+  grid-row: 1;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.dm-reset:hover {
+  color: var(--ink);
+  background: var(--bg-3);
+}
+
+/* ------------------------------------------------------------------ paste check */
+
+.dm-paste {
+  max-width: 560px;
+  margin-top: 40px;
+}
+.dm-paste-label {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--ink-2);
+  font-size: 15px;
+}
+.dm-paste-box {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 14px;
+  background: var(--bg-2);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.dm-paste-box:focus-within {
+  box-shadow: inset 0 0 0 1.5px var(--ink-3);
+}
+.dm-paste-input {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 15.5px;
+  resize: none;
+}
+.dm-paste-input::placeholder {
+  color: var(--ink-3);
+}
+.dm-paste-input:focus-visible {
+  outline: none;
+}
+.dm-paste-att {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 6px;
+  border-radius: 10px;
+  background: var(--bg-3);
+  width: fit-content;
+  max-width: 100%;
+}
+.dm-paste-att img {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  object-position: top;
+  border-radius: 6px;
+  background: #fff;
+}
+.dm-paste-att figcaption {
+  display: grid;
+  color: var(--ink);
+  font-size: 14px;
+  padding-right: 28px;
+}
+.dm-paste-att figcaption span {
+  color: var(--ink-3);
+  font-size: 13px;
+}
+.dm-paste-x {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.dm-paste-x:hover {
+  color: var(--ink);
+  background: var(--line);
+}
+.dm-paste-note {
+  margin: 10px 0 0;
+  color: var(--ink-3);
+  font-size: 13.5px;
+}
+
+/* ------------------------------------------------------------------ phone layout, under the frame */
+
+.dm[data-layout="phone"] .dm-under {
+  grid-template-columns: 1fr;
+}
+.dm[data-layout="phone"] .dm-reset {
+  grid-column: 1;
+  grid-row: 3;
+  justify-self: start;
+}
