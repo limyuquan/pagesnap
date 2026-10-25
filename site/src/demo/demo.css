@@ -182,18 +182,21 @@
   color: var(--ink-2);
   font-size: 11.5px;
 }
-.dm-step[data-done] {
+.dm-step[data-next] {
   color: var(--ink);
-  box-shadow: inset 0 0 0 1px var(--line-2);
+  box-shadow: inset 0 0 0 1px var(--ink-3);
 }
-.dm-step[data-done] kbd {
-  background: var(--red);
-  color: #fff;
+.dm-step[data-next] kbd {
+  color: var(--ink);
 }
-.dm-step[data-done] > span:first-of-type {
-  text-decoration: line-through;
-  text-decoration-color: var(--red);
-  text-decoration-thickness: 2px;
+.dm-step[data-done] {
+  color: var(--ink-3);
+}
+.dm-step-check {
+  width: 16px;
+  height: 16px;
+  margin: 0 2px;
+  color: var(--ink-2);
 }
 .dm-reset {
   grid-column: 2;

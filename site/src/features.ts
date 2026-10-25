@@ -1,7 +1,7 @@
 /**
  * The small live visuals in the features section, loaded when the section comes near the view.
- * Two of them run the product's own code: the markup loop draws with the editor's `drawDoc`, and
- * the sizing loop asks the engine's `planCopy` what ⌘C would copy for each set of marks.
+ * Both run the product's own code: the markup loop draws with the editor's `drawDoc`, and the
+ * sizing loop asks the engine's `planCopy` what ⌘C would copy for each set of marks.
  * Loops only run while on screen; under reduced motion each shows its finished state.
  */
 import { drawDoc } from '@/editor/engine/draw';
@@ -23,7 +23,8 @@ type Box = { x: number; y: number; w: number; h: number };
 const DPR = data.dpr;
 const desktop = data.layouts.desktop;
 const reduce = matchMedia('(prefers-reduced-motion: reduce)');
-const srcOf = (l: Layout) => `${import.meta.env.BASE_URL}${l.src}`;
+/** The top of the page (the demo's poster, usually cached already): every crop drawn here fits it. */
+const srcOf = (l: Layout) => `${import.meta.env.BASE_URL}${l.poster.src}`;
 const px = (css: number) => css * DPR;
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const ease = (t: number) => 1 - (1 - t) ** 3;
@@ -53,63 +54,6 @@ function bitmap(src: string): Promise<ImageBitmap> {
     bitmaps.set(src, p);
   }
   return p;
-}
-
-// ------------------------------------------------------------------ stitching comparison
-
-/** Screen by screen down the page; the plain stitch gets the top bar again on every screen. */
-function capture(root: HTMLElement): void {
-  const naive = root.querySelector<HTMLElement>('[data-naive]');
-  const strips = [...root.querySelectorAll<HTMLElement>('.stitch-strip')];
-  if (!naive) return;
-  const H = desktop.css.h;
-  const vh = 760;
-  const ys: number[] = [];
-  for (let y = 0; y < H - vh; y += vh) ys.push(y);
-  ys.push(H - vh);
-  const src = `url("${srcOf(desktop)}")`;
-  const repeats = ys.slice(1).map((y, i) => {
-    const hdr = document.createElement('i');
-    hdr.className = 'hdr';
-    hdr.style.setProperty('--y', `${((y / H) * 100).toFixed(3)}%`);
-    hdr.style.setProperty('--src', src);
-    naive.append(hdr);
-    let mk: HTMLElement | null = null;
-    if (i === 1) {
-      mk = document.createElement('i');
-      mk.className = 'mk';
-      mk.style.setProperty('--y', `${((y / H) * 100).toFixed(3)}%`);
-      naive.append(mk);
-    }
-    return { y, hdr, mk };
-  });
-  /** `done` screens taken (0..n). */
-  const set = (done: number) => {
-    const bottom = done <= 0 ? 0 : Math.min(H, (ys[done - 1] ?? 0) + vh);
-    for (const s of strips) s.style.setProperty('--dev', `${((bottom / H) * 100).toFixed(2)}%`);
-    for (const r of repeats) {
-      r.hdr.style.setProperty('--on', r.y < bottom ? '1' : '0');
-      r.mk?.style.setProperty('--on', done >= ys.length ? '1' : '0');
-    }
-  };
-  if (reduce.matches) {
-    set(ys.length);
-    return;
-  }
-  set(0);
-  whileVisible(root, () => {
-    let done = 0;
-    let hold = 0;
-    const t = setInterval(() => {
-      if (done < ys.length) set(++done);
-      else if (++hold > 5) {
-        hold = 0;
-        done = 0;
-        set(0);
-      }
-    }, 620);
-    return () => clearInterval(t);
-  });
 }
 
 // ------------------------------------------------------------------ markup loop
@@ -386,10 +330,8 @@ function sizing(root: HTMLElement): void {
 
 export function startFeatureVisuals(): void {
   const q = (name: string) => document.querySelector<HTMLElement>(`[data-visual="${name}"]`);
-  const c = q('capture');
   const m = q('tools');
   const s = q('size');
-  if (c) capture(c);
   if (m) markup(m);
   if (s) sizing(s);
 }

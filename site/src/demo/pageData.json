@@ -3,6 +3,10 @@
   "layouts": {
     "desktop": {
       "src": "demo/fernhill-desktop.webp",
+      "poster": {
+        "src": "demo/fernhill-desktop-top.webp",
+        "h": 1000
+      },
       "css": {
         "w": 1200,
         "h": 3338
@@ -70,6 +74,10 @@
     },
     "mobile": {
       "src": "demo/fernhill-mobile.webp",
+      "poster": {
+        "src": "demo/fernhill-mobile-top.webp",
+        "h": 1300
+      },
       "css": {
         "w": 390,
         "h": 5061

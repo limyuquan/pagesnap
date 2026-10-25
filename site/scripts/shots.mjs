@@ -37,7 +37,7 @@ try {
       });
       const page = await ctx.newPage();
       await page.goto(base, { waitUntil: 'networkidle' });
-      await page.waitForSelector('[data-testid="demo"]', { timeout: 15_000 });
+      await page.waitForSelector('#demo-root .dm', { timeout: 15_000 });
       await page.waitForTimeout(900);
       await page.screenshot({ path: `${out}/${s.name}-${scheme}-top.png` });
       // Walk down once so lazy visuals and reveals run, then shoot the whole page.

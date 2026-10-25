@@ -115,10 +115,11 @@ body {
   color: #111;
 }
 
-:where(a, button, [tabindex], summary, textarea, input):focus {
+/* The editor inside the demo keeps its own focus ring (app.css). */
+:where(a, button, [tabindex], summary, textarea, input):not(.dm-ed *):focus {
   outline: none;
 }
-:where(a, button, [tabindex], summary, textarea, input):focus-visible {
+:where(a, button, [tabindex], summary, textarea, input):not(.dm-ed *):focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 3px;
   border-radius: 6px;
@@ -255,7 +256,7 @@ code {
   }
 }
 .eyebrow {
-  margin: 0 0 16px;
+  margin: 0 0 8px;
   color: var(--ink-3);
   font-size: 14px;
   font-weight: 500;
@@ -281,7 +282,7 @@ code {
   left: -0.02em;
   right: -0.04em;
   bottom: -0.02em;
-  height: max(5px, 0.075em);
+  height: max(3px, 0.06em);
   border-radius: 99px;
   background: var(--red);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
@@ -297,7 +298,7 @@ code {
   content: "";
   position: absolute;
   inset: -0.02em -0.16em -0.1em -0.1em;
-  border: max(3px, 0.06em) solid var(--red);
+  border: max(3px, 0.055em) solid var(--red);
   border-radius: 0.1em;
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
 }
@@ -310,27 +311,6 @@ code {
   color: #141414;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
-}
-/* An arrow from the right, pointing at the word. */
-.mark-arrow {
-  position: relative;
-  white-space: nowrap;
-}
-.mark-arrow::after {
-  content: "";
-  position: absolute;
-  left: calc(100% + 0.2em);
-  top: 0.05em;
-  width: 2.1em;
-  height: 1.1em;
-  background:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 84 44'%3E%3Cpath d='M80 6C58 6 34 14 14 32' fill='none' stroke='%23ff3b30' stroke-width='5' stroke-linecap='round'/%3E%3Cpath d='M4 40 9 19 26 35z' fill='%23ff3b30' stroke='%23ff3b30' stroke-width='3' stroke-linejoin='round'/%3E%3C/svg%3E")
-    no-repeat center / contain;
-}
-@media (max-width: 520px) {
-  .mark-arrow::after {
-    display: none;
-  }
 }
 @keyframes draw-x {
   from {
@@ -498,11 +478,11 @@ code {
 @media (min-width: 900px) {
   .feat-split {
     grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-    align-items: center;
+    align-items: start;
     gap: clamp(40px, 6vw, 96px);
   }
-  .feat-split.flip > .copy {
-    order: 2;
+  .feat-split.wide-vis {
+    grid-template-columns: minmax(0, 4fr) minmax(0, 7fr);
   }
 }
 
@@ -521,69 +501,91 @@ code {
   color: var(--ink);
   font-weight: 550;
 }
-/* Stitching, side by side: a plain stitch repeats a sticky header on every screen. */
+/* Stitching, side by side, zoomed on the join between the first two screens. */
 .stitch {
-  display: flex;
-  justify-content: center;
-  gap: clamp(20px, 5vw, 56px);
+  display: grid;
+  gap: clamp(20px, 3vw, 32px);
+}
+@media (min-width: 640px) {
+  .stitch {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 .stitch figure {
   display: grid;
-  gap: 14px;
-  justify-items: center;
+  gap: 12px;
   margin: 0;
 }
 .stitch figcaption {
   color: var(--ink-3);
   font-size: 14px;
-  text-align: center;
+  line-height: 1.45;
 }
 .stitch-ours {
   color: var(--ink);
 }
-.stitch-strip {
+/* A window on page px 0..640 by 540..1000; the second screen starts at 760. */
+.seam {
+  --w: 640;
+  --top: 540;
   position: relative;
-  width: clamp(132px, 17vw, 196px);
-  aspect-ratio: 1200 / 3338;
-  border-radius: 6px;
-  background: var(--bg-3);
+  overflow: hidden;
+  aspect-ratio: 640 / 460;
+  border-radius: 10px;
+  background: #fff;
   box-shadow: 0 0 0 1px var(--line);
 }
-.stitch-strip > img,
-.stitch-strip .hdr {
+/* fernhill-seam.webp is page px 0..640 by 0..1000. */
+.seam img {
   position: absolute;
   left: 0;
-  width: 100%;
-  border-radius: 6px;
-}
-.stitch-strip > img {
   top: 0;
-  height: 100%;
-  clip-path: inset(0 0 calc(100% - var(--dev, 100%)) 0);
-  transition: clip-path 520ms var(--ease-out);
+  width: 100%;
+  max-width: none;
+  transform: translateY(calc(-100% * var(--top) / 1000));
 }
-/* A copy of the page's top bar where each later screen begins. */
-.stitch-strip .hdr {
-  top: var(--y);
-  height: calc(100% * 100 / 3338);
-  border-radius: 0;
-  background-image: var(--src);
-  background-size: 100% auto;
-  background-position: 0 0;
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
-  opacity: var(--on, 1);
-  transition: opacity 300ms var(--ease);
-}
-.stitch-strip .mk {
+/* The top bar, glued in again where the second screen begins. */
+.seam-dup {
   position: absolute;
-  left: -6px;
-  right: -6px;
-  top: calc(var(--y) - 5px);
-  height: calc(100% * 100 / 3338 + 10px);
-  border-radius: 4px;
-  box-shadow: 0 0 0 2px var(--red);
-  opacity: var(--on, 1);
-  transition: opacity 300ms var(--ease);
+  left: 0;
+  right: 0;
+  top: calc(100% * (760 - 540) / 460);
+  height: calc(100% * 98 / 460);
+  overflow: hidden;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.18);
+}
+.seam-dup img {
+  transform: none;
+}
+.seam-mark {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: calc(100% * (760 - 540) / 460 - 5px);
+  height: calc(100% * 98 / 460 + 10px);
+  border-radius: 5px;
+  box-shadow: 0 0 0 3px var(--red);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .js [data-reveal] .seam-dup {
+    opacity: 0;
+    transform: translateY(-10px);
+    transition:
+      opacity 420ms 500ms var(--ease-out),
+      transform 520ms 500ms var(--ease-out);
+  }
+  .js [data-reveal] .seam-mark {
+    opacity: 0;
+    transform: scale(1.04);
+    transition:
+      opacity 320ms 1100ms var(--ease),
+      transform 420ms 1100ms var(--ease-out);
+  }
+  .js [data-reveal][data-in] .seam-dup,
+  .js [data-reveal][data-in] .seam-mark {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* Markup: the tools as keys, each drawing its own mark with the editor's renderer. */
@@ -637,7 +639,7 @@ code {
 }
 .size-col {
   position: relative;
-  width: clamp(130px, 24vw, 200px);
+  width: clamp(150px, 26vw, 290px);
   aspect-ratio: 1200 / 3338;
   overflow: hidden;
   border-radius: 6px;
@@ -771,14 +773,27 @@ code {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  height: 32px;
+  height: 30px;
   padding: 0 10px;
   border-radius: 6px;
   color: var(--ink);
 }
-.sendto li span {
+.sendto-web {
+  margin: 0;
+  padding: 6px 10px 7px;
   color: var(--ink-3);
-  font-size: 12.5px;
+  font-size: 13.5px;
+}
+@media (prefers-color-scheme: light) {
+  .sendto {
+    background: #fff;
+    box-shadow:
+      0 0 0 1px rgb(0 0 0 / 0.1),
+      0 14px 30px -18px rgb(20 20 30 / 0.3);
+  }
+  .sendto li[data-hot] {
+    background: rgb(0 0 0 / 0.06);
+  }
 }
 .sendto li[data-hot] {
   background: var(--line-2);
@@ -883,7 +898,7 @@ code {
 }
 .code pre {
   margin: 0;
-  padding: 16px 56px 16px 18px;
+  padding: 16px 18px;
   overflow-x: auto;
   color: var(--ink);
   font-family: var(--mono);
@@ -996,5 +1011,12 @@ code {
 @media (prefers-reduced-motion: reduce) {
   .mark-u::after {
     animation: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .code pre {
+    padding: 14px;
+    font-size: 12px;
   }
 }

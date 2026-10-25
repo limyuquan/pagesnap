@@ -261,6 +261,9 @@
   outline-offset: -2px;
   border-radius: 0;
 }
+.dm-page {
+  background: #fff no-repeat 0 0 / 100% auto;
+}
 .dm-page img {
   display: block;
   width: 100%;

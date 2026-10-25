@@ -1,6 +1,6 @@
 /**
  * The only script on the first paint: a few kilobytes. It loads the demo (React and the real
- * editor) when the demo comes near the view, and the feature visuals when they do.
+ * editor) once the visitor shows interest in it, and the feature visuals when they come near.
  */
 import './styles/site.css';
 
@@ -30,15 +30,28 @@ function loadDemo(autoStart = false): Promise<void> {
 }
 // A click on the stand-in's icon before the chunk landed starts the capture once it has.
 document.getElementById('demo-static-icon')?.addEventListener('click', () => void loadDemo(true));
-io(host, '300px 0px', () => {
-  // Let the hero paint and settle first.
-  const idle = window.requestIdleCallback ?? ((cb: () => void) => setTimeout(cb, 200));
-  idle(() => void loadDemo(), { timeout: 1200 });
-});
+// The stand-in looks exactly like the demo, so the real one can wait for a sign of interest:
+// a pointer or focus inside it, or the visitor scrolling it mostly into view. The first paint
+// never waits on React or the editor.
+for (const type of ['pointerenter', 'touchstart', 'focusin'] as const) {
+  host?.addEventListener(type, () => void loadDemo(), { once: true, passive: true });
+}
+if (host) {
+  const seen = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((e) => e.intersectionRatio >= 0.6)) {
+        seen.disconnect();
+        void loadDemo();
+      }
+    },
+    { threshold: [0.6] },
+  );
+  seen.observe(host);
+}
 
 // ------------------------------------------------------------------ feature visuals
 
-io(document.getElementById('features'), '400px 0px', () => {
+io(document.getElementById('features'), '200px 0px', () => {
   void import('./features').then(({ startFeatureVisuals }) => startFeatureVisuals());
 });
 

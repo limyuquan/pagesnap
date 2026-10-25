@@ -127,12 +127,12 @@
                 <div class="dm-view">
                   <div class="dm-page">
                     <picture>
-                      <source media="(max-width: 639px)" srcset="/demo/fernhill-mobile.webp" width="390" height="5061" />
+                      <source media="(max-width: 639px)" srcset="/demo/fernhill-mobile-top.webp" width="390" height="1300" />
                       <img
-                        src="/demo/fernhill-desktop.webp"
+                        src="/demo/fernhill-desktop-top.webp"
                         alt="Plans and pricing for Fernhill, a fictional notes app: three plans, a comparison table, a changelog and questions."
                         width="1200"
-                        height="3338"
+                        height="1000"
                         fetchpriority="high"
                       />
                     </picture>
@@ -151,7 +151,7 @@
       </section>
 
       <div class="features" id="features">
-        <section class="feat feat-split wrap" aria-labelledby="f-capture" data-reveal>
+        <section class="feat feat-split wide-vis wrap" aria-labelledby="f-capture" data-reveal>
           <div class="copy">
             <h2 id="f-capture">The whole page, not just the screen.</h2>
             <p>
@@ -165,25 +165,27 @@
               <li><b>Apps that scroll in a panel</b> are expanded to their full length.</li>
             </ul>
           </div>
-          <div class="visual stitch" data-visual="capture" aria-hidden="true">
+          <div class="visual stitch" aria-hidden="true">
             <figure>
-              <div class="stitch-strip" data-naive>
-                <img src="/demo/fernhill-desktop.webp" alt="" loading="lazy" decoding="async" />
+              <div class="seam">
+                <img src="/demo/fernhill-seam.webp" alt="" loading="lazy" decoding="async" />
+                <div class="seam-dup"><img src="/demo/fernhill-seam.webp" alt="" loading="lazy" decoding="async" /></div>
+                <i class="seam-mark"></i>
               </div>
-              <figcaption>Screenshots glued together</figcaption>
+              <figcaption>Screenshots glued together: the bar is back on every screen</figcaption>
             </figure>
             <figure>
-              <div class="stitch-strip">
-                <img src="/demo/fernhill-desktop.webp" alt="" loading="lazy" decoding="async" />
+              <div class="seam">
+                <img src="/demo/fernhill-seam.webp" alt="" loading="lazy" decoding="async" />
               </div>
-              <figcaption class="stitch-ours">Page Snap</figcaption>
+              <figcaption class="stitch-ours">Page Snap: the page as it really is</figcaption>
             </figure>
           </div>
         </section>
 
         <section class="feat wrap" aria-labelledby="f-markup" data-reveal>
           <div class="copy">
-            <h2 id="f-markup">Opens ready to <span class="mark-arrow">draw.</span></h2>
+            <h2 id="f-markup">Opens ready to draw.</h2>
             <p>
               The arrow tool is already armed. Box, underline, highlighter, pen and text are one key
               away, and any mark can be clicked to move, resize, rotate or bend it.
@@ -213,7 +215,7 @@
           <div class="visual size" data-visual="size" aria-hidden="true">
             <figure class="size-fig">
               <div class="size-col">
-                <img src="/demo/fernhill-desktop.webp" alt="" loading="lazy" decoding="async" />
+                <img src="/demo/fernhill-column.webp" alt="" loading="lazy" decoding="async" />
                 <span class="win"></span>
                 <i class="dot"></i>
                 <i class="dot"></i>
@@ -221,7 +223,7 @@
               <figcaption class="tnum">A 3,338 px page</figcaption>
             </figure>
             <div class="size-scale">
-              <span class="br br-win"><b class="tnum">2,576 px</b><span>at most, what <kbd>⌘C</kbd> copies</span></span>
+              <span class="br br-win"><b class="tnum">2,576 px</b><span>the most <kbd>⌘C</kbd> sends</span></span>
             </div>
           </div>
         </section>
@@ -246,7 +248,7 @@
             </p>
           </section>
           <section class="send" aria-labelledby="f-send" data-reveal>
-            <h2 id="f-send">Next: send it straight to your AI.</h2>
+            <h2 id="f-send">Next: send to your AI.</h2>
             <p>
               A Send to menu, in the works, opens your AI app or a new chat on the web with the
               image attached or ready to paste. You still read it over and press send.
@@ -254,18 +256,14 @@
             <div class="sendto">
               <div class="sendto-head">Send to</div>
               <ul>
-                <li data-hot>Claude <span>app</span></li>
-                <li>ChatGPT <span>app</span></li>
-                <li>Codex <span>app</span></li>
-                <li>Claude Code <span>app</span></li>
-                <li>T3 Code <span>app</span></li>
+                <li data-hot>Claude</li>
+                <li>ChatGPT</li>
+                <li>Codex</li>
+                <li>Claude Code</li>
+                <li>T3 Code</li>
               </ul>
               <hr />
-              <ul>
-                <li>ChatGPT <span>web</span></li>
-                <li>Claude <span>web</span></li>
-                <li>Gemini <span>web</span></li>
-              </ul>
+              <p class="sendto-web">ChatGPT, Claude and Gemini on the web</p>
             </div>
           </section>
         </div>
@@ -282,7 +280,8 @@
             <h3>Build</h3>
             <div>
               <div class="code">
-                <pre><code id="cmd-build">git clone https://github.com/limyuquan/pagesnap.git
+                <pre><code id="cmd-build">git clone \
+  https://github.com/limyuquan/pagesnap.git
 cd pagesnap
 corepack enable
 pnpm install &amp;&amp; pnpm build</code></pre>

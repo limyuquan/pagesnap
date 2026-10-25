@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { setEditorKeyFilter, useEditorShortcuts, useEditorStore } from '@/editor/engine';
+import { CheckIcon } from '@/editor/ui/icons';
 import { combo, IS_MAC } from '@/editor/ui/keys';
 import { TooltipLayer } from '@/editor/ui/Tooltip';
 import { deleteSession } from '@/shared/db';
@@ -109,7 +110,7 @@ export function Demo({ autoStart = false }: { autoStart?: boolean }) {
     const onWheel = (e: WheelEvent) => {
       if (!activeRef.current) e.stopPropagation();
     };
-    view.addEventListener('wheel', onWheel, { capture: true });
+    view.addEventListener('wheel', onWheel, { capture: true, passive: true });
     return () => view.removeEventListener('wheel', onWheel, { capture: true });
   }, []);
 
@@ -301,6 +302,8 @@ export function Demo({ autoStart = false }: { autoStart?: boolean }) {
             // biome-ignore lint/a11y/noNoninteractiveTabindex: the fake page scrolls by keyboard too
             tabIndex={0}
             aria-label="A fictional pricing page"
+            // The top of the page paints at once; the full image lands over it.
+            style={{ backgroundImage: `url("${page.poster}")` }}
           >
             <img
               src={page.src}
@@ -346,7 +349,14 @@ export function Demo({ autoStart = false }: { autoStart?: boolean }) {
         </p>
         <ul className="dm-steps" aria-label="Things to try">
           {STEPS.map((s) => (
-            <StepChip key={s.id} id={s.id} label={s.label} k={s.key} done={done.has(s.id)} />
+            <StepChip
+              key={s.id}
+              id={s.id}
+              label={s.label}
+              k={s.key}
+              done={done.has(s.id)}
+              next={hasEditor && step?.id === s.id}
+            />
           ))}
         </ul>
         <button type="button" className="dm-reset" onClick={reset} data-testid="demo-reset">
@@ -359,11 +369,28 @@ export function Demo({ autoStart = false }: { autoStart?: boolean }) {
   );
 }
 
-function StepChip({ id, label, k, done }: { id: StepId; label: string; k: string; done: boolean }) {
+function StepChip({
+  id,
+  label,
+  k,
+  done,
+  next,
+}: {
+  id: StepId;
+  label: string;
+  k: string;
+  done: boolean;
+  next: boolean;
+}) {
   const key = id === 'copy' ? combo('mod+c') : k;
   return (
-    <li className="dm-step" data-done={done || undefined} data-step={id}>
-      {key && <kbd>{key}</kbd>}
+    <li
+      className="dm-step"
+      data-done={done || undefined}
+      data-next={next || undefined}
+      data-step={id}
+    >
+      {done ? <CheckIcon className="dm-step-check" /> : key && <kbd>{key}</kbd>}
       <span>{label}</span>
       <span className="sr-only">{done ? ', done' : ''}</span>
     </li>

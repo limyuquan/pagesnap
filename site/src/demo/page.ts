@@ -27,6 +27,8 @@ export interface PageLayout {
   name: LayoutName;
   /** Absolute URL of the full-page image. */
   src: string;
+  /** The top of the page alone: what the window shows first, while the full image loads. */
+  poster: string;
   dpr: number;
   /** Page size, CSS px. */
   css: { w: number; h: number };
@@ -48,6 +50,7 @@ export function pageLayout(name: LayoutName): PageLayout {
   return {
     name,
     src: `${import.meta.env.BASE_URL}${l.src}`,
+    poster: `${import.meta.env.BASE_URL}${l.poster.src}`,
     dpr: data.dpr,
     css: l.css,
     targets: l.targets as Record<TargetName, Box>,
