@@ -136,6 +136,7 @@ pnpm test:e2e:cft   # the same suite in Chrome for Testing (a real Chrome build)
 | `src/shared/` | Types, annotation model (`annotations.ts`, versioned with migrations), IndexedDB (`db.ts`), settings, limits |
 | `tests/unit`, `tests/browser`, `tests/e2e` | Vitest unit, Vitest browser mode, Playwright end-to-end |
 | `scripts/` | Fixture server, icon generator, README image framer |
+| `site/` | The website (`pnpm site:dev`, `site:build`, `site:test`). Its demo runs the real editor from `src/editor` on a pre-rendered fictional page; `wxt/browser` is shimmed there. After editor changes, also run `pnpm site:test` |
 
 ### 5. How a capture flows
 
