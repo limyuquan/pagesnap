@@ -3,7 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
     <title>Page Snap</title>
+    <!-- Paint the surround before any JS or CSS loads, so the tab never flashes white. -->
+    <style>
+      html { background: #2b2b2f; }
+      @media (prefers-color-scheme: light) { html { background: #dcdce0; } }
+    </style>
   </head>
   <body>
     <div id="root"></div>

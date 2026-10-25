@@ -1,0 +1,199 @@
+/* Options page (owner: C). Same tokens as the editor (app.css); one column, hairline rows. */
+
+.po-page {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 56px 28px 80px;
+}
+
+.po-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 40px;
+}
+.po-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.po-brand h1 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+.po-saved {
+  color: var(--ps-ink-3);
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 200ms var(--ps-ease);
+}
+.po-saved[data-on] {
+  opacity: 1;
+}
+
+.po-section {
+  margin-top: 36px;
+}
+.po-section h2 {
+  margin: 0 0 4px;
+  color: var(--ps-ink-3);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.po-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 32px;
+  min-width: 0;
+  margin: 0;
+  padding: 16px 0;
+  border: 0;
+  border-top: 1px solid var(--ps-line);
+}
+fieldset.po-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 248px;
+  align-items: start;
+}
+/* legend can't be a grid item in every engine; float takes it out of the special legend box. */
+fieldset.po-row > legend {
+  float: left;
+  padding: 0;
+}
+
+.po-label {
+  display: grid;
+  gap: 3px;
+  color: var(--ps-ink);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.po-desc {
+  display: block;
+  color: var(--ps-ink-3);
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.45;
+  max-width: 44ch;
+}
+
+.po-choices {
+  display: grid;
+  gap: 12px;
+}
+.po-choice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+}
+.po-choice input {
+  margin: 2px 0 0;
+  accent-color: var(--ps-ink);
+}
+.po-choice-label {
+  display: block;
+  color: var(--ps-ink);
+}
+
+.po-switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 30px;
+  height: 18px;
+  margin: 0;
+  border-radius: 9px;
+  background: var(--ps-line-2);
+  transition: background-color 160ms var(--ps-ease);
+}
+.po-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--ps-ink);
+  transition:
+    transform 180ms var(--ps-ease-out),
+    background-color 160ms var(--ps-ease);
+}
+.po-switch:checked {
+  background: var(--ps-ink);
+}
+.po-switch:checked::after {
+  transform: translateX(12px);
+  background: var(--ps-chrome);
+}
+
+.po-keyset {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.po-kbd {
+  font: inherit;
+  font-weight: 500;
+  color: var(--ps-ink);
+  letter-spacing: 0.02em;
+}
+.po-change {
+  color: var(--ps-ink-2);
+  text-decoration: underline;
+  text-decoration-color: var(--ps-line-2);
+  text-underline-offset: 3px;
+}
+
+.po-keys {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 32px;
+  margin: 0;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--ps-line);
+}
+.po-keys > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  color: var(--ps-ink-2);
+  font-size: 12.5px;
+}
+.po-keys dt {
+  min-width: 0;
+}
+.po-keys dd {
+  margin: 0;
+  flex: none;
+}
+.po-keys kbd {
+  font: inherit;
+  letter-spacing: 0.04em;
+  color: var(--ps-ink);
+  white-space: pre;
+  font-variant-numeric: tabular-nums;
+}
+
+.po-foot {
+  margin-top: 40px;
+  padding-top: 16px;
+  border-top: 1px solid var(--ps-line);
+  color: var(--ps-ink-3);
+  font-size: 12.5px;
+}
+
+@media (max-width: 560px) {
+  .po-keys {
+    grid-template-columns: 1fr;
+  }
+  fieldset.po-row {
+    grid-template-columns: 1fr;
+  }
+}

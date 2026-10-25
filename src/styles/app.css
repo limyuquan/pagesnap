@@ -1,10 +1,91 @@
-/* Extension pages only (editor, options). Nothing is ever injected into captured pages. Owner: C. */
+/*
+ * Extension pages only (editor, options). Nothing is ever injected into captured pages. Owner: C.
+ *
+ * Design language: native-tool chrome (CleanShot / Shottr / Figma UI3), not a web app. The capture is
+ * the hero; the chrome is monochrome graphite with hairlines, no cards, no gradients. The only
+ * colours in the chrome are the annotation swatches, the focus ring (system blue) and the amber
+ * notice glyph. Type is the platform UI face (SF on macOS) at native sizes, numbers tabular.
+ *
+ * Both schemes are designed: dark is the default reference (a white web page pops on graphite);
+ * light keeps a mid-grey surround so the page still reads as an object.
+ */
 @import "tailwindcss";
 
 @theme {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --color-ink: #111111;
-  --color-mark: #ff3b30;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  --color-ink: var(--ps-ink);
+  --color-ink-2: var(--ps-ink-2);
+  --color-ink-3: var(--ps-ink-3);
+  --color-line: var(--ps-line);
+  --color-chrome: var(--ps-chrome);
+  --color-surround: var(--ps-surround);
+}
+
+:root {
+  color-scheme: dark light;
+
+  /* Dark (reference). */
+  --ps-chrome: #1b1b1d;
+  --ps-surround: #2b2b2f;
+  --ps-elev: #252528;
+  --ps-ink: #ededee;
+  --ps-ink-2: rgb(237 237 238 / 0.7);
+  --ps-ink-3: rgb(237 237 238 / 0.42);
+  --ps-ink-4: rgb(237 237 238 / 0.24);
+  --ps-line: rgb(255 255 255 / 0.08);
+  --ps-line-2: rgb(255 255 255 / 0.13);
+  --ps-hover: rgb(255 255 255 / 0.06);
+  --ps-press: rgb(255 255 255 / 0.1);
+  --ps-on: rgb(255 255 255 / 0.13);
+  --ps-primary: #ededee;
+  --ps-primary-ink: #18181a;
+  --ps-primary-hover: #ffffff;
+  --ps-focus: #3d8bff;
+  --ps-warn: #e3a33b;
+  --ps-swatch-rim: rgb(255 255 255 / 0.2);
+  --ps-notice: #202023;
+  /* HUD (hint, toast, tooltip): dark in both schemes. */
+  --ps-hud: #1c1c1e;
+  --ps-hud-line: rgb(255 255 255 / 0.1);
+  --ps-hud-ink: #f2f2f3;
+  --ps-hud-ink-2: rgb(242 242 243 / 0.7);
+  --ps-hud-ink-3: rgb(242 242 243 / 0.45);
+  --ps-shadow:
+    0 1px 0 rgb(255 255 255 / 0.04) inset, 0 10px 30px -8px rgb(0 0 0 / 0.55),
+    0 2px 6px rgb(0 0 0 / 0.3);
+  --ps-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ps-ease-out: cubic-bezier(0.32, 0.72, 0, 1);
+  --ps-bar-h: 46px;
+  /* Read by the engine's canvas for the backdrop around the page (EditorCanvas contract). */
+  --ps-canvas-bg: var(--ps-surround);
+  --ps-r: 6px;
+  --ps-r-lg: 9px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --ps-chrome: #f7f7f8;
+    --ps-surround: #dddddf;
+    --ps-elev: #ffffff;
+    --ps-ink: #1b1b1d;
+    --ps-ink-2: rgb(27 27 29 / 0.68);
+    --ps-ink-3: rgb(27 27 29 / 0.46);
+    --ps-ink-4: rgb(27 27 29 / 0.24);
+    --ps-line: rgb(0 0 0 / 0.08);
+    --ps-line-2: rgb(0 0 0 / 0.12);
+    --ps-hover: rgb(0 0 0 / 0.045);
+    --ps-press: rgb(0 0 0 / 0.08);
+    --ps-on: rgb(0 0 0 / 0.085);
+    --ps-primary: #1b1b1d;
+    --ps-primary-ink: #fafafa;
+    --ps-primary-hover: #000000;
+    --ps-focus: #0a6cff;
+    --ps-warn: #b7791f;
+    --ps-swatch-rim: rgb(0 0 0 / 0.16);
+    --ps-notice: #f0f0f1;
+    --ps-shadow: 0 10px 30px -10px rgb(20 20 30 / 0.28), 0 2px 6px rgb(20 20 30 / 0.1);
+  }
 }
 
 html,
@@ -12,3 +93,663 @@ body,
 #root {
   height: 100%;
 }
+
+body {
+  margin: 0;
+  background: var(--ps-chrome);
+  color: var(--ps-ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ focus */
+
+:where(button, a, [role="radio"], [role="menuitemradio"], [role="menuitem"], input, select):focus {
+  outline: none;
+}
+:where(
+  button,
+  a,
+  [role="radio"],
+  [role="menuitemradio"],
+  [role="menuitem"],
+  input,
+  select
+):focus-visible {
+  outline: 2px solid var(--ps-focus);
+  outline-offset: 1px;
+}
+
+/* ------------------------------------------------------------------ editor shell */
+
+.ps-shell {
+  display: grid;
+  grid-template-rows: var(--ps-bar-h) auto minmax(0, 1fr);
+  height: 100%;
+  background: var(--ps-surround);
+}
+
+.ps-bar {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  padding: 0 8px 0 14px;
+  background: var(--ps-chrome);
+  box-shadow: 0 1px 0 var(--ps-line);
+  user-select: none;
+}
+
+.ps-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.ps-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 8px;
+  background: var(--ps-line-2);
+  flex: none;
+}
+
+/* Controls wait for the image: visible (so the layout doesn't jump) but quiet and inert. */
+.ps-bar [data-inactive] {
+  opacity: 0.38;
+  transition: opacity 240ms var(--ps-ease);
+}
+
+/* Page identity, left of the bar. */
+.ps-ident {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  color: var(--ps-ink-2);
+  text-decoration: none;
+  border-radius: 4px;
+}
+.ps-ident-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--ps-ink);
+  font-weight: 500;
+  letter-spacing: -0.005em;
+}
+.ps-ident-host {
+  flex: none;
+  color: var(--ps-ink-3);
+  font-size: 12px;
+}
+a.ps-ident:hover .ps-ident-host {
+  color: var(--ps-ink-2);
+}
+@media (max-width: 1180px) {
+  .ps-ident-host {
+    display: none;
+  }
+}
+@media (max-width: 1040px) {
+  .ps-ident {
+    display: none;
+  }
+}
+
+/* Icon button (tools, history, download). */
+.ps-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ps-r);
+  background: transparent;
+  color: var(--ps-ink-2);
+  cursor: default;
+  transition:
+    background-color 120ms var(--ps-ease),
+    color 120ms var(--ps-ease);
+}
+.ps-btn svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+.ps-btn:hover {
+  background: var(--ps-hover);
+  color: var(--ps-ink);
+}
+.ps-btn:active {
+  background: var(--ps-press);
+}
+.ps-btn[aria-pressed="true"] {
+  background: var(--ps-on);
+  color: var(--ps-ink);
+}
+.ps-btn:disabled,
+.ps-btn[aria-disabled="true"] {
+  color: var(--ps-ink-4);
+  background: transparent;
+}
+
+/* Text button (zoom, size). */
+.ps-tbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 6px 0 8px;
+  border: 0;
+  border-radius: var(--ps-r);
+  background: transparent;
+  color: var(--ps-ink-2);
+  font: inherit;
+  cursor: default;
+  transition:
+    background-color 120ms var(--ps-ease),
+    color 120ms var(--ps-ease);
+}
+.ps-tbtn:hover,
+.ps-tbtn[aria-expanded="true"] {
+  background: var(--ps-hover);
+  color: var(--ps-ink);
+}
+.ps-tbtn:disabled {
+  color: var(--ps-ink-4);
+  background: transparent;
+}
+.ps-tbtn .ps-chev {
+  width: 10px;
+  height: 10px;
+  opacity: 0.7;
+}
+
+/* Colour swatches. */
+.ps-swatches {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+.ps-swatch {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ps-r);
+  background: transparent;
+  cursor: default;
+}
+.ps-swatch::before {
+  content: "";
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--sw);
+  box-shadow: inset 0 0 0 1px var(--ps-swatch-rim);
+  transition: transform 140ms var(--ps-ease);
+}
+.ps-swatch::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 21px;
+  height: 21px;
+  margin: -10.5px 0 0 -10.5px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.5px var(--ps-ink);
+  opacity: 0;
+  transform: scale(0.85);
+  transition:
+    opacity 140ms var(--ps-ease),
+    transform 160ms var(--ps-ease);
+}
+.ps-swatch:hover::before {
+  transform: scale(1.12);
+}
+.ps-swatch[aria-checked="true"]::after {
+  opacity: 1;
+  transform: scale(1);
+}
+.ps-swatch[aria-checked="true"]:hover::before {
+  transform: none;
+}
+.ps-swatches[aria-disabled="true"] .ps-swatch::before {
+  opacity: 0.32;
+  transform: none;
+}
+
+/* Primary action. */
+.ps-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 92px;
+  height: 30px;
+  padding: 0 13px;
+  margin-left: 6px;
+  border: 0;
+  border-radius: var(--ps-r);
+  background: var(--ps-primary);
+  color: var(--ps-primary-ink);
+  font: inherit;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  cursor: default;
+  transition:
+    background-color 120ms var(--ps-ease),
+    transform 120ms var(--ps-ease);
+}
+.ps-primary:hover {
+  background: var(--ps-primary-hover);
+}
+.ps-primary:active {
+  transform: scale(0.97);
+}
+.ps-primary:disabled {
+  opacity: 0.45;
+  transform: none;
+}
+.ps-primary svg {
+  width: 16px;
+  height: 16px;
+}
+.ps-primary .ps-kbd {
+  font: inherit;
+  font-weight: 500;
+  opacity: 0.5;
+}
+.ps-primary[data-state="copied"] .ps-kbd {
+  display: none;
+}
+
+/* Popover menu (zoom, size). */
+.ps-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 10;
+  min-width: 132px;
+  padding: 5px;
+  border-radius: var(--ps-r-lg);
+  background: var(--ps-elev);
+  box-shadow:
+    0 0 0 1px var(--ps-line-2),
+    var(--ps-shadow);
+  animation: ps-pop-in 140ms var(--ps-ease-out);
+  transform-origin: top center;
+}
+@keyframes ps-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.98);
+  }
+}
+.ps-menuitem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ps-ink);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+.ps-menuitem:hover,
+.ps-menuitem:focus-visible {
+  background: var(--ps-hover);
+  outline: none;
+}
+.ps-menuitem:focus-visible {
+  box-shadow: inset 0 0 0 1.5px var(--ps-focus);
+}
+.ps-menuitem .ps-menuitem-kbd {
+  margin-left: auto;
+  color: var(--ps-ink-3);
+}
+.ps-menuitem .ps-check {
+  width: 14px;
+  height: 14px;
+  color: var(--ps-ink);
+}
+.ps-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--ps-line);
+}
+
+/* ------------------------------------------------------------------ tooltip */
+
+.ps-tip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: #0f0f10;
+  color: #f2f2f3;
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.07),
+    0 6px 16px rgb(0 0 0 / 0.35);
+  opacity: 0;
+  transition: opacity 90ms var(--ps-ease);
+}
+.ps-tip[data-open] {
+  opacity: 1;
+}
+.ps-tip kbd {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  color: rgb(242 242 243 / 0.55);
+  letter-spacing: 0.02em;
+}
+
+/* ------------------------------------------------------------------ stage */
+
+.ps-stage {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--ps-surround);
+}
+.ps-canvas {
+  position: absolute;
+  inset: 0;
+}
+.ps-canvas[data-hidden] {
+  visibility: hidden;
+}
+
+/* Quiet notice strip (partial capture, visible-only): a recessed band under the bar. */
+.ps-notice {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 32px;
+  padding: 0 6px 0 14px;
+  background: var(--ps-notice);
+  box-shadow: 0 1px 0 var(--ps-line);
+  color: var(--ps-ink-2);
+  font-size: 12.5px;
+}
+.ps-notice-icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--ps-warn);
+}
+.ps-notice strong {
+  color: var(--ps-ink);
+  font-weight: 600;
+}
+.ps-notice-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ps-notice .ps-btn {
+  width: 24px;
+  height: 24px;
+}
+.ps-notice .ps-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Overlay messages (centred in the stage). */
+.ps-center {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+}
+@keyframes ps-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* Loading: words and one hairline that fills as slices arrive. Delayed, so fast opens never flash. */
+.ps-loading {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  animation: ps-fade-in 260ms var(--ps-ease) 180ms both;
+}
+.ps-loading b {
+  color: var(--ps-ink);
+  font-weight: 500;
+}
+.ps-loading span {
+  color: var(--ps-ink-3);
+}
+.ps-progress {
+  position: relative;
+  width: 168px;
+  height: 2px;
+  margin-top: 14px;
+  overflow: hidden;
+  border-radius: 1px;
+  background: var(--ps-line-2);
+}
+.ps-progress i {
+  position: absolute;
+  inset: 0;
+  background: var(--ps-ink-2);
+  transform-origin: left;
+  transform: scaleX(var(--p, 0));
+  transition: transform 420ms var(--ps-ease-out);
+}
+.ps-progress[data-indeterminate] i {
+  width: 30%;
+  transform: translateX(-100%);
+  animation: ps-slide 1.3s var(--ps-ease) infinite;
+}
+@keyframes ps-slide {
+  to {
+    transform: translateX(340%);
+  }
+}
+
+/* Error: an editorial column, title, one paragraph, one action. */
+.ps-error {
+  width: min(440px, 100%);
+  animation: ps-fade-in 260ms var(--ps-ease) both;
+}
+.ps-error h1 {
+  margin: 0 0 8px;
+  font-size: 19px;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.014em;
+  color: var(--ps-ink);
+}
+.ps-error p {
+  margin: 0;
+  color: var(--ps-ink-2);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.ps-error .ps-error-hint {
+  margin-top: 18px;
+  padding-top: 14px;
+  box-shadow: 0 -1px 0 var(--ps-line);
+}
+.ps-error kbd {
+  font: inherit;
+  color: var(--ps-ink);
+  font-weight: 500;
+}
+.ps-error-action {
+  display: inline-block;
+  margin-top: 14px;
+  color: var(--ps-ink);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: var(--ps-ink-4);
+  text-underline-offset: 3px;
+  border-radius: 3px;
+}
+.ps-error-action:hover {
+  text-decoration-color: currentColor;
+}
+.ps-link {
+  border: 0;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ps-ink-2);
+  font: inherit;
+  text-decoration: none;
+  cursor: default;
+}
+.ps-link:hover {
+  color: var(--ps-ink);
+  background: var(--ps-hover);
+}
+
+/*
+ * Bottom-centre HUD over the canvas: the first-open hint and the status toast share one slot.
+ * Always dark (CleanShot convention): it sits on top of a mostly white screenshot in both schemes.
+ */
+.ps-dock {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  z-index: 4;
+  transform: translateX(-50%);
+  display: grid;
+  justify-items: center;
+  pointer-events: none;
+}
+.ps-dock > * {
+  grid-area: 1 / 1;
+}
+.ps-hint,
+.ps-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-radius: var(--ps-r-lg);
+  background: var(--ps-hud);
+  box-shadow:
+    0 0 0 1px var(--ps-hud-line),
+    0 10px 30px -8px rgb(0 0 0 / 0.45),
+    0 2px 6px rgb(0 0 0 / 0.22);
+  color: var(--ps-hud-ink-2);
+  white-space: nowrap;
+  transition:
+    opacity 200ms var(--ps-ease),
+    transform 260ms var(--ps-ease-out);
+}
+.ps-hint[data-hidden],
+.ps-toast[data-hidden] {
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+}
+.ps-hint kbd,
+.ps-toast kbd {
+  font: inherit;
+  color: var(--ps-hud-ink);
+  font-weight: 500;
+}
+.ps-hint-sep {
+  width: 1px;
+  height: 12px;
+  background: var(--ps-hud-line);
+}
+.ps-toast {
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 16px 10px 12px;
+  pointer-events: auto;
+}
+.ps-toast-icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  color: var(--ps-hud-ink);
+}
+.ps-toast-icon[data-tone="warn"] {
+  color: #e3a33b;
+}
+.ps-toast-body {
+  display: grid;
+  gap: 2px;
+}
+.ps-toast-title {
+  color: var(--ps-hud-ink);
+  font-weight: 500;
+}
+.ps-toast-title .ps-dim {
+  margin-left: 8px;
+  color: var(--ps-hud-ink-3);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.ps-toast-note {
+  color: var(--ps-hud-ink-2);
+  font-size: 12.5px;
+}
+.ps-spin {
+  animation: ps-spin 0.9s linear infinite;
+}
+@keyframes ps-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* biome-ignore-start lint/complexity/noImportantStyles: reduced motion has to beat every component transition */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}
+/* biome-ignore-end lint/complexity/noImportantStyles: see above */
