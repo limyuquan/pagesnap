@@ -157,7 +157,8 @@ test.describe('fixtures', () => {
     const R = first.target.clientRect;
     const contentH = first.target.content.h;
     expect(first.target.kind).toBe('element');
-    expect(session.css.h).toBeCloseTo(session.viewport.h + contentH - R.h, 5);
+    // Scroll offsets are whole px; the content height can be fractional, so allow 1 px.
+    expect(Math.abs(session.css.h - (session.viewport.h + contentH - R.h))).toBeLessThanOrEqual(1);
     expect(await pageState(page)).toEqual(before);
     expect(await page.evaluate(() => document.querySelector('#content')?.scrollTop)).toBe(400);
 

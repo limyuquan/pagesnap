@@ -50,5 +50,10 @@
     "vite": "8.3.5",
     "vitest": "5.0.5",
     "wxt": "0.21.4"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/limyuquan/pagesnap.git"
   }
 }
