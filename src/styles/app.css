@@ -35,15 +35,19 @@
   --ps-ink-4: rgb(237 237 238 / 0.24);
   --ps-line: rgb(255 255 255 / 0.08);
   --ps-line-2: rgb(255 255 255 / 0.13);
-  --ps-hover: rgb(255 255 255 / 0.06);
-  --ps-press: rgb(255 255 255 / 0.1);
-  --ps-on: rgb(255 255 255 / 0.13);
+  --ps-hover: rgb(255 255 255 / 0.09);
+  --ps-press: rgb(255 255 255 / 0.14);
+  --ps-on: rgb(255 255 255 / 0.17);
+  --ps-on-rim: rgb(255 255 255 / 0.08);
   --ps-primary: #ededee;
   --ps-primary-ink: #18181a;
   --ps-primary-hover: #ffffff;
   --ps-focus: #3d8bff;
   --ps-warn: #e3a33b;
-  --ps-swatch-rim: rgb(255 255 255 / 0.2);
+  --ps-danger: #d93a30;
+  --ps-danger-hover: #e5443a;
+  --ps-swatch-rim: rgb(255 255 255 / 0.32);
+  --ps-swatch-rim-hover: rgb(255 255 255 / 0.45);
   --ps-notice: #202023;
   /* HUD (hint, toast, tooltip): dark in both schemes. */
   --ps-hud: #1c1c1e;
@@ -74,15 +78,19 @@
     --ps-ink-4: rgb(27 27 29 / 0.24);
     --ps-line: rgb(0 0 0 / 0.08);
     --ps-line-2: rgb(0 0 0 / 0.12);
-    --ps-hover: rgb(0 0 0 / 0.045);
-    --ps-press: rgb(0 0 0 / 0.08);
-    --ps-on: rgb(0 0 0 / 0.085);
+    --ps-hover: rgb(0 0 0 / 0.06);
+    --ps-press: rgb(0 0 0 / 0.1);
+    --ps-on: rgb(0 0 0 / 0.11);
+    --ps-on-rim: rgb(0 0 0 / 0.06);
     --ps-primary: #1b1b1d;
     --ps-primary-ink: #fafafa;
     --ps-primary-hover: #000000;
     --ps-focus: #0a6cff;
     --ps-warn: #b7791f;
-    --ps-swatch-rim: rgb(0 0 0 / 0.16);
+    --ps-danger: #d1342a;
+    --ps-danger-hover: #c22d24;
+    --ps-swatch-rim: rgb(0 0 0 / 0.22);
+    --ps-swatch-rim-hover: rgb(0 0 0 / 0.36);
     --ps-notice: #f0f0f1;
     --ps-shadow: 0 10px 30px -10px rgb(20 20 30 / 0.28), 0 2px 6px rgb(20 20 30 / 0.1);
   }
@@ -140,10 +148,18 @@ body {
   position: relative;
   z-index: 3;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  /*
+   * Identity | tools | output. The centre column is centred while there's room; when there isn't,
+   * the output column keeps its full width and the identity gives way (it truncates, then hides).
+   * Nothing can overlap: both control columns are at least their content wide.
+   */
+  grid-template-columns: minmax(0, 1fr) max-content minmax(max-content, 1fr);
   align-items: center;
   gap: 16px;
   padding: 0 8px 0 14px;
+  /* Clip sideways only: popovers hang below the bar. */
+  overflow-x: clip;
+  overflow-y: visible;
   background: var(--ps-chrome);
   box-shadow: 0 1px 0 var(--ps-line);
   user-select: none;
@@ -157,6 +173,26 @@ body {
   margin: 0;
   padding: 0;
   border: 0;
+}
+
+/*
+ * Explicit columns: the identity is `display: none` on narrow windows, and auto-placement would
+ * then slide the tools into the identity's shrinkable column (the old 1000 px overlap).
+ */
+.ps-bar-mid,
+.ps-bar-end {
+  min-width: max-content;
+}
+.ps-bar-mid {
+  grid-column: 2;
+}
+.ps-bar-end {
+  grid-column: 3;
+  justify-self: end;
+}
+.ps-bar-mid > *,
+.ps-bar-end > * {
+  flex: none;
 }
 
 .ps-sep {
@@ -197,8 +233,20 @@ body {
   color: var(--ps-ink-3);
   font-size: 12px;
 }
+a.ps-ident {
+  cursor: default;
+}
+a.ps-ident .ps-ident-host {
+  cursor: pointer;
+  text-decoration: underline transparent;
+  text-underline-offset: 3px;
+  transition:
+    color 120ms var(--ps-ease),
+    text-decoration-color 120ms var(--ps-ease);
+}
 a.ps-ident:hover .ps-ident-host {
   color: var(--ps-ink-2);
+  text-decoration-color: var(--ps-ink-4);
 }
 @media (max-width: 1180px) {
   .ps-ident-host {
@@ -225,6 +273,7 @@ a.ps-ident:hover .ps-ident-host {
   cursor: default;
   transition:
     background-color 120ms var(--ps-ease),
+    box-shadow 120ms var(--ps-ease),
     color 120ms var(--ps-ease);
 }
 .ps-btn svg {
@@ -239,9 +288,14 @@ a.ps-ident:hover .ps-ident-host {
 .ps-btn:active {
   background: var(--ps-press);
 }
+/* The active tool: a pressed key, unmistakable at a glance (design review §1). */
 .ps-btn[aria-pressed="true"] {
   background: var(--ps-on);
+  box-shadow: inset 0 0 0 1px var(--ps-on-rim);
   color: var(--ps-ink);
+}
+.ps-btn[aria-pressed="true"]:active {
+  background: var(--ps-press);
 }
 .ps-btn:disabled,
 .ps-btn[aria-disabled="true"] {
@@ -271,6 +325,10 @@ a.ps-ident:hover .ps-ident-host {
   background: var(--ps-hover);
   color: var(--ps-ink);
 }
+.ps-tbtn:active {
+  background: var(--ps-press);
+}
+/* Disabled keeps showing its value (last tool's colour and size), just quieter. */
 .ps-tbtn:disabled {
   color: var(--ps-ink-4);
   background: transparent;
@@ -281,7 +339,94 @@ a.ps-ident:hover .ps-ident-host {
   opacity: 0.7;
 }
 
-/* Colour swatches. */
+/* Colour: one well in the bar, the eight swatches in a popover row. */
+.ps-dot {
+  display: block;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--sw, transparent);
+  box-shadow: inset 0 0 0 1px var(--ps-swatch-rim);
+  transition:
+    box-shadow 140ms var(--ps-ease),
+    opacity 140ms var(--ps-ease);
+}
+.ps-dot[data-mixed] {
+  box-shadow: inset 0 0 0 1px var(--ps-ink-3);
+  background: linear-gradient(135deg, transparent 46%, var(--ps-ink-3) 46% 54%, transparent 54%);
+}
+/* The swatch that matches the chrome (black on dark, white on light) gets a firmer rim. */
+@media (prefers-color-scheme: dark) {
+  .ps-dot[data-tone="black"],
+  .ps-swatch[data-tone="black"]::before {
+    box-shadow: inset 0 0 0 1.5px rgb(255 255 255 / 0.5);
+  }
+}
+@media (prefers-color-scheme: light) {
+  .ps-dot[data-tone="white"],
+  .ps-swatch[data-tone="white"]::before {
+    box-shadow: inset 0 0 0 1.5px rgb(0 0 0 / 0.5);
+  }
+}
+.ps-well {
+  gap: 5px;
+  padding: 0 6px 0 7px;
+}
+
+.ps-pop.ps-pop-colors {
+  display: flex;
+  gap: 1px;
+  min-width: 0;
+  padding: 5px;
+}
+.ps-swatch-item {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  width: 30px;
+  padding: 7px 0 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  cursor: default;
+}
+.ps-swatch-item .ps-dot {
+  width: 18px;
+  height: 18px;
+}
+.ps-swatch-item:hover,
+.ps-swatch-item:focus-visible {
+  background: var(--ps-hover);
+  outline: none;
+}
+.ps-swatch-item:focus-visible {
+  box-shadow: inset 0 0 0 1.5px var(--ps-focus);
+}
+.ps-swatch-item:hover .ps-dot {
+  box-shadow: inset 0 0 0 1px var(--ps-swatch-rim-hover);
+}
+.ps-swatch-item[aria-checked="true"] .ps-dot {
+  box-shadow:
+    inset 0 0 0 1px var(--ps-swatch-rim),
+    0 0 0 2px var(--ps-elev),
+    0 0 0 3.5px var(--ps-ink);
+}
+.ps-tbtn:disabled .ps-dot {
+  opacity: 0.4;
+}
+.ps-swatch-key {
+  color: var(--ps-ink-4);
+  font-size: 10.5px;
+  line-height: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ps-swatch-item:hover .ps-swatch-key,
+.ps-swatch-item[aria-checked="true"] .ps-swatch-key {
+  color: var(--ps-ink-2);
+}
+
+/* Swatch radios (options page "Starting colour"). */
 .ps-swatches {
   display: flex;
   align-items: center;
@@ -291,7 +436,7 @@ a.ps-ident:hover .ps-ident-host {
   position: relative;
   display: inline-grid;
   place-items: center;
-  width: 22px;
+  width: 24px;
   height: 30px;
   padding: 0;
   border: 0;
@@ -301,21 +446,21 @@ a.ps-ident:hover .ps-ident-host {
 }
 .ps-swatch::before {
   content: "";
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: var(--sw);
   box-shadow: inset 0 0 0 1px var(--ps-swatch-rim);
-  transition: transform 140ms var(--ps-ease);
+  transition: box-shadow 140ms var(--ps-ease);
 }
 .ps-swatch::after {
   content: "";
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 21px;
-  height: 21px;
-  margin: -10.5px 0 0 -10.5px;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
   border-radius: 50%;
   box-shadow: 0 0 0 1.5px var(--ps-ink);
   opacity: 0;
@@ -325,18 +470,83 @@ a.ps-ident:hover .ps-ident-host {
     transform 160ms var(--ps-ease);
 }
 .ps-swatch:hover::before {
-  transform: scale(1.12);
+  box-shadow: inset 0 0 0 1px var(--ps-swatch-rim-hover);
 }
 .ps-swatch[aria-checked="true"]::after {
   opacity: 1;
   transform: scale(1);
 }
-.ps-swatch[aria-checked="true"]:hover::before {
-  transform: none;
+
+/* Size: a dot in the bar, the real stroke in the menu. */
+.ps-size {
+  gap: 5px;
 }
-.ps-swatches[aria-disabled="true"] .ps-swatch::before {
-  opacity: 0.32;
-  transform: none;
+.ps-size-glyph {
+  display: inline-grid;
+}
+.ps-size-glyph[data-bump] {
+  animation: ps-bump 180ms var(--ps-ease-out);
+}
+@keyframes ps-bump {
+  from {
+    transform: scale(1.35);
+  }
+}
+.ps-size-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+.ps-size-dot > span {
+  border-radius: 50%;
+  background: currentColor;
+}
+.ps-size-num {
+  width: 2ch;
+  text-align: left;
+}
+.ps-size-prev {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 20px;
+  color: var(--ps-ink-2);
+}
+.ps-size-line {
+  width: 22px;
+  background: currentColor;
+}
+.ps-size-line[data-band] {
+  opacity: 0.6;
+}
+.ps-size-text {
+  font-weight: 700;
+  line-height: 1;
+}
+.ps-menuitem[aria-checked="true"] .ps-size-prev {
+  color: var(--ps-ink);
+}
+
+/* Zoom. */
+.ps-zoom-label {
+  min-width: 4ch;
+  text-align: right;
+}
+.ps-zoom-label[data-fit] {
+  min-width: 0;
+}
+.ps-menuitem-mark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  margin-left: -2px;
+}
+.ps-menuitem.ps-menuitem-check {
+  gap: 8px;
+  min-width: 176px;
 }
 
 /* Primary action. */
@@ -382,6 +592,26 @@ a.ps-ident:hover .ps-ident-host {
 }
 .ps-primary[data-state="copied"] .ps-kbd {
   display: none;
+}
+
+/*
+ * Narrow windows (split screen on a 13" laptop is 720–900 px). In order of width: the host goes
+ * (≤1180), then the page title (≤1040), then the ⌘C in Copy and the size number (≤860).
+ */
+@media (max-width: 860px) {
+  .ps-copy-kbd,
+  .ps-size-num {
+    display: none;
+  }
+  .ps-primary {
+    min-width: 72px;
+  }
+  .ps-sep {
+    margin: 0 5px;
+  }
+  .ps-bar {
+    gap: 10px;
+  }
 }
 
 /* Popover menu (zoom, size). */
@@ -486,6 +716,18 @@ a.ps-ident:hover .ps-ident-host {
   overflow: hidden;
   background: var(--ps-surround);
 }
+/* Keyboard focus on the capture: a ring drawn over the canvas (an outline would sit under it). */
+.ps-stage:focus-visible {
+  outline: none;
+}
+.ps-stage:focus-visible::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  box-shadow: inset 0 0 0 2px var(--ps-focus);
+  pointer-events: none;
+}
 .ps-canvas {
   position: absolute;
   inset: 0;
@@ -513,9 +755,6 @@ a.ps-ident:hover .ps-ident-host {
   width: 14px;
   height: 14px;
   color: var(--ps-warn);
-}
-.ps-notice[data-tone="info"] .ps-notice-icon {
-  color: var(--ps-ink-3);
 }
 .ps-notice strong {
   color: var(--ps-ink);
@@ -582,6 +821,22 @@ a.ps-ident:hover .ps-ident-host {
   transform: scaleX(var(--p, 0));
   transition: transform 420ms var(--ps-ease-out);
 }
+.ps-progress[data-stalled] i {
+  background: var(--ps-ink-3);
+}
+.ps-loading-hint {
+  max-width: 320px;
+  margin: 18px 0 0;
+  color: var(--ps-ink-3);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: center;
+}
+.ps-loading-hint kbd {
+  font: inherit;
+  color: var(--ps-ink-2);
+  font-weight: 500;
+}
 .ps-progress[data-indeterminate] i {
   width: 30%;
   transform: translateX(-100%);
@@ -625,6 +880,11 @@ a.ps-ident:hover .ps-ident-host {
 .ps-error-action {
   display: inline-block;
   margin-top: 14px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
   color: var(--ps-ink);
   font-weight: 500;
   text-decoration: underline;
@@ -717,6 +977,9 @@ a.ps-ident:hover .ps-ident-host {
 }
 .ps-toast-icon[data-tone="warn"] {
   color: #e3a33b;
+}
+.ps-toast[data-tone="info"] .ps-toast-icon {
+  color: var(--ps-hud-ink-2);
 }
 .ps-toast-body {
   display: grid;

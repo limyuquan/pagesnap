@@ -55,3 +55,17 @@ export function redo(h: History, now = Date.now()): History {
 
 export const canUndo = (h: History): boolean => h.past.length > 0;
 export const canRedo = (h: History): boolean => h.future.length > 0;
+
+/**
+ * Replace the present with `next` without a new undo step (a burst of keyboard nudges is one
+ * step). The rev still increases, so caches and autosave see the change.
+ */
+export function amend(h: History, next: AnnotationDoc, now = Date.now()): History {
+  if (next === h.present || next.shapes === h.present.shapes) return h;
+  return { ...h, present: { ...next, rev: h.present.rev + 1, updatedAt: now }, future: [] };
+}
+
+/** Start over from `doc` (adopting another tab's edit): no undo across that boundary. */
+export function reset(doc: AnnotationDoc): History {
+  return createHistory(doc);
+}

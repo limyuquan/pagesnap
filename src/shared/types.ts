@@ -71,6 +71,8 @@ export type CaptureErrorCode =
   | 'CAPTURE_FAILED'
   /** The service worker was terminated mid-capture and the session was found unfinished. */
   | 'INTERRUPTED'
+  /** The capture couldn't be written to IndexedDB (disk full, quota). */
+  | 'STORAGE_FAILED'
   | 'INTERNAL';
 
 export interface CaptureError {
@@ -84,12 +86,26 @@ export type CaptureWarningCode =
   | 'TRUNCATED'
   /** Only the visible area was captured (fallback for restricted pages). */
   | 'VISIBLE_ONLY'
-  /** An inner scroll container was captured and expanded in place. */
+  /**
+   * Informational, not a problem: an inner scroll container was captured and expanded in place.
+   * Listed in `INFO_WARNING_CODES`; UIs shouldn't present it as a warning.
+   */
   | 'INNER_SCROLLER'
-  /** The document height changed during the capture. */
+  /**
+   * The page changed while it was captured in a way the capture could not absorb, so a seam may be
+   * misaligned. Growth that was followed or re-anchored is not reported.
+   */
   | 'HEIGHT_CHANGED'
   /** Some images were still loading when their slice was taken. */
-  | 'IMAGES_PENDING';
+  | 'IMAGES_PENDING'
+  /**
+   * The page couldn't be scrolled at all (scrolling locked, typically by a cookie wall or dialog),
+   * so one screen was captured.
+   */
+  | 'NOT_SCROLLABLE';
+
+/** Warning codes that are informational only (never shown as a warning). */
+export const INFO_WARNING_CODES: readonly CaptureWarningCode[] = ['INNER_SCROLLER'];
 
 export interface CaptureWarning {
   code: CaptureWarningCode;
@@ -119,6 +135,12 @@ export interface SliceMeta {
   index: number;
   /** Actual scroll offset of the target when the slice was taken (read back, may be fractional), CSS px. */
   scroll: Point;
+  /**
+   * Where the slice goes in the output, CSS px in the same space as `scroll` (so `place - range.x0/y0`
+   * is the output offset). Differs from `scroll` when content above the slice grew or shrank during
+   * the capture and the slice was re-anchored to the previous seam. Absent = `scroll`.
+   */
+  place?: Point;
   /** Pixel size of the stored PNG. */
   bitmap: Size;
   /** Target geometry at the moment of the slice. */
@@ -193,6 +215,8 @@ export interface CaptureSession {
   slices: SliceMeta[];
   /** Final once the status is final. Empty `parts` while `capturing` is allowed. */
   layout: BaseLayout;
+  /** Total bytes of the stored slice PNGs (for retention). Absent on older records. */
+  bytes?: number;
 }
 
 /**

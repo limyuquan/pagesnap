@@ -197,3 +197,64 @@ fieldset.po-row > legend {
     grid-template-columns: 1fr;
   }
 }
+
+/* Buttons: quiet hairline buttons; the destructive one is the only coloured control on the page. */
+.po-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+.po-btn {
+  flex: none;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--ps-r);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--ps-line-2);
+  color: var(--ps-ink);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: default;
+  transition:
+    background-color 120ms var(--ps-ease),
+    box-shadow 120ms var(--ps-ease),
+    color 120ms var(--ps-ease);
+}
+.po-btn:hover {
+  background: var(--ps-hover);
+}
+.po-btn:active {
+  background: var(--ps-press);
+}
+.po-btn:disabled {
+  color: var(--ps-ink-4);
+  background: transparent;
+}
+.po-btn-danger {
+  background: var(--ps-danger);
+  box-shadow: none;
+  color: #fff;
+}
+.po-btn-danger:hover {
+  background: var(--ps-danger-hover);
+}
+.po-btn-danger:active {
+  background: var(--ps-danger);
+  filter: brightness(0.94);
+}
+.po-btn-danger:disabled {
+  background: var(--ps-danger);
+  color: #fff;
+  opacity: 0.6;
+}
+.po-row[data-step="confirm"],
+.po-row[data-step="deleting"] {
+  animation: po-ask 160ms var(--ps-ease-out);
+}
+@keyframes po-ask {
+  from {
+    opacity: 0.4;
+  }
+}

@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { EditorCanvas, useEditorShortcuts, useEditorStore } from '@/editor/engine';
 import { parseEditorHash } from '@/shared/handoff';
-import { Dock } from './ui/Dock';
+import { Dock, dismissHint } from './ui/Dock';
 import { CaptureNotice, ErrorState, LoadingState } from './ui/StageStates';
+import { useCaptureStalled, useOpenTimedOut } from './ui/stuck';
 import { TopBar } from './ui/Toolbar';
 import { TooltipLayer } from './ui/Tooltip';
 import { countRender, installUiTestHook } from './ui/testHook';
 import { useSessionMeta } from './ui/useSessionMeta';
-import { viewPhase } from './ui/viewPhase';
+import { type ViewPhase, viewPhase } from './ui/viewPhase';
 
 installUiTestHook();
 
@@ -25,13 +26,24 @@ export function App() {
   const load = useEditorStore((s) => s.load);
   const init = useEditorStore((s) => s.actions.init);
   const meta = useSessionMeta(sessionId);
+  const [stageKeys, setStageKeys] = useState(false);
   useEditorShortcuts();
 
   useEffect(() => {
     if (hashId) void init(hashId);
   }, [init, hashId]);
 
-  const phase = viewPhase(!!sessionId, load, meta);
+  const raw = viewPhase(!!sessionId, load, meta);
+  const stalled = useCaptureStalled(raw.kind === 'waiting', meta?.updatedAt);
+  const openTimedOut = useOpenTimedOut(raw.kind === 'loading');
+  const phase: ViewPhase = openTimedOut
+    ? {
+        kind: 'error',
+        code: 'LOAD_FAILED',
+        message: 'It took too long to open. Reloading the tab usually fixes it.',
+        captureCode: null,
+      }
+    : raw;
   const ready = phase.kind === 'ready';
 
   useEffect(() => {
@@ -48,13 +60,35 @@ export function App() {
     >
       <TopBar meta={meta} tools={phase.kind !== 'error'} ready={ready} />
       {ready ? <CaptureNotice meta={meta} /> : <div />}
-      <main className="ps-stage" aria-label="Capture">
-        <div className="ps-canvas" data-hidden={phase.kind === 'error' || undefined}>
+      {/*
+       * The stage is one tab stop after the toolbar, so keyboard users can land on the capture
+       * and scroll it (the engine's arrow / page / Space / Home / End keys are left alone while a
+       * toolbar button has focus). Keyboard focus shows the keys in the dock.
+       */}
+      <main
+        className="ps-stage"
+        aria-label="Capture"
+        aria-keyshortcuts="ArrowUp ArrowDown PageUp PageDown Space Home End"
+        tabIndex={ready ? 0 : -1}
+        onFocus={(e) => {
+          if (e.target === e.currentTarget) setStageKeys(e.currentTarget.matches(':focus-visible'));
+        }}
+        onBlur={(e) => {
+          if (e.target === e.currentTarget) setStageKeys(false);
+        }}
+      >
+        <div
+          className="ps-canvas"
+          data-hidden={phase.kind === 'error' || undefined}
+          onPointerDownCapture={dismissHint}
+        >
           <EditorCanvas />
         </div>
-        {(phase.kind === 'loading' || phase.kind === 'waiting') && <LoadingState phase={phase} />}
+        {(phase.kind === 'loading' || phase.kind === 'waiting') && (
+          <LoadingState phase={phase} stalled={stalled} />
+        )}
         {phase.kind === 'error' && <ErrorState phase={phase} meta={meta} />}
-        <Dock ready={ready} pageCssH={meta?.css.h ?? null} />
+        <Dock ready={ready} page={meta?.css ?? null} keys={stageKeys} />
       </main>
       <TooltipLayer />
     </div>

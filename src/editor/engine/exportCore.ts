@@ -28,12 +28,25 @@ export interface ExportJob {
   region: Rect;
   /** Output px per image px. */
   scale: number;
+  /**
+   * Edge snapping (design §5.4): the most SOURCE image px each edge of `region` may move inward to
+   * land in whitespace instead of cutting through text (0 = keep that edge). Single-canvas path
+   * only; the streamed path ignores it.
+   */
+  snap?: ExportSnap;
+}
+
+export interface ExportSnap {
+  top: number;
+  bottom: number;
 }
 
 export interface ExportResult {
   blob: Blob;
-  /** Output pixel size. */
+  /** Output pixel size (after snapping). */
   size: Size;
+  /** Source region actually rendered, whole image px. Equals `job.region` unless an edge snapped. */
+  region: Rect;
   /** Wall time of the render + encode. */
   ms: number;
   /** True when the streaming encoder was used. */
@@ -53,6 +66,8 @@ export interface RenderExportOptions {
   stripRows?: number;
   /** PNG row filter on the streamed path. Default `'up'`. */
   filter?: PngFilter;
+  /** Canvas factory for every canvas of both paths (tests). Default `new OffscreenCanvas(w, h)`. */
+  createCanvas?: (w: number, h: number) => OffscreenCanvas;
 }
 
 /** Memory guard for one export canvas: 128 MP is 512 MB of RGBA. */
@@ -60,6 +75,16 @@ export const EXPORT_SINGLE_MAX_AREA = TILE_MAX_AREA * 2;
 /** Streamed path: at most this many px per strip canvas (and per temp canvas when scaling). */
 export const STRIP_MAX_AREA = 32 * 2 ** 20;
 export const STRIP_MAX_ROWS = 2_048;
+
+/** `Error.name` when even a strip canvas can't be allocated. */
+export const EXPORT_MEMORY_ERROR = 'ExportMemoryError';
+
+/** Edge snapping keeps at most this many output px of whitespace next to the content. */
+const SNAP_KEEP = 8;
+/** A row is blank when every sampled channel is within this range (max - min). */
+const SNAP_TOLERANCE = 6;
+
+const newCanvas = (w: number, h: number) => new OffscreenCanvas(w, h);
 
 export async function renderExport(
   job: ExportJob,
@@ -70,30 +95,216 @@ export async function renderExport(
   deps.signal?.throwIfAborted();
   const size = outputSize(job.region, job.scale);
   const singleMax = opts.singleMaxArea ?? EXPORT_SINGLE_MAX_AREA;
+  const create = opts.createCanvas ?? newCanvas;
   if (size.w <= CANVAS_MAX_SIDE && size.h <= CANVAS_MAX_SIDE && size.w * size.h <= singleMax) {
-    const blob = await renderSingle(job, deps, size);
-    if (blob) return { blob, size, ms: performance.now() - t0, streamed: false };
-    // No context (allocation refused): fall through to the bounded-memory path.
+    const single = await renderSingle(job, deps, size, create);
+    if (single) return { ...single, ms: performance.now() - t0, streamed: false };
+    // Allocation refused (no context, a dead canvas, or an allocation error while encoding):
+    // fall through to the bounded-memory path.
   }
-  const blob = await renderStreamed(job, deps, size, opts);
-  return { blob, size, ms: performance.now() - t0, streamed: true };
+  const blob = await renderStreamed(job, deps, size, opts, create);
+  return { blob, size, region: { ...job.region }, ms: performance.now() - t0, streamed: true };
 }
 
-async function renderSingle(job: ExportJob, deps: ExportDeps, size: Size): Promise<Blob | null> {
-  const { region, scale } = job;
-  const canvas = new OffscreenCanvas(size.w, size.h);
+function isAbort(err: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true;
+  return (
+    typeof err === 'object' && err !== null && (err as { name?: unknown }).name === 'AbortError'
+  );
+}
+
+/** Errors Chrome raises for a canvas it couldn't allocate (or encode for lack of memory). */
+function isAllocationError(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false;
+  const { name, message } = err as { name?: unknown; message?: unknown };
+  if (name === 'AbortError') return false;
+  if (name === 'IndexSizeError' || name === 'RangeError' || name === 'EncodingError') return true;
+  return typeof message === 'string' && /alloc|memory/i.test(message);
+}
+
+function memoryError(): Error {
+  const err = new Error('Not enough memory to export this image');
+  err.name = EXPORT_MEMORY_ERROR;
+  return err;
+}
+
+/**
+ * Chrome hands out a working-looking 2D context for a canvas it failed to allocate: drawing is a
+ * no-op, `getImageData` reads black and `convertToBlob` throws. Write one known pixel and read it
+ * back; the composite paints over it afterwards (it's cleared here anyway).
+ */
+function probeCanvas(ctx: OffscreenCanvasRenderingContext2D): boolean {
+  ctx.save();
   try {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#010203';
+    ctx.fillRect(0, 0, 1, 1);
+    const d = ctx.getImageData(0, 0, 1, 1).data;
+    ctx.clearRect(0, 0, 1, 1);
+    return (
+      Math.abs((d[0] ?? -9) - 1) <= 1 &&
+      Math.abs((d[1] ?? -9) - 2) <= 1 &&
+      Math.abs((d[2] ?? -9) - 3) <= 1
+    );
+  } catch (err) {
+    if (isAllocationError(err)) return false;
+    throw err;
+  } finally {
+    ctx.restore();
+  }
+}
+
+function release(canvas: OffscreenCanvas | null): void {
+  if (!canvas) return;
+  canvas.width = 0;
+  canvas.height = 0;
+}
+
+type SingleResult = Pick<ExportResult, 'blob' | 'size' | 'region'>;
+
+/** Single-canvas render. `null` when the canvas couldn't be allocated (caller streams instead). */
+async function renderSingle(
+  job: ExportJob,
+  deps: ExportDeps,
+  size: Size,
+  create: (w: number, h: number) => OffscreenCanvas,
+): Promise<SingleResult | null> {
+  const { region, scale } = job;
+  let canvas: OffscreenCanvas | null = null;
+  let cut: OffscreenCanvas | null = null;
+  try {
+    canvas = create(size.w, size.h);
     const ctx = canvas.getContext('2d', { alpha: false });
-    if (!ctx) return null;
+    if (!ctx || !probeCanvas(ctx)) return null;
     await compositeRegion(ctx, deps.session.layout, region, scale, deps.loadSlice);
     deps.signal?.throwIfAborted();
+    const rows = job.snap ? snapRows(ctx, size, job.snap, scale) : null;
     drawDoc(ctx, job.doc, { x: region.x, y: region.y, scale });
     deps.signal?.throwIfAborted();
-    return await canvas.convertToBlob({ type: 'image/png' });
+
+    if (rows) {
+      // Back to whole source px, then copy the kept rows (same transform, so pixels are identical).
+      const y0 = region.y + Math.round(rows.top / scale);
+      const y1 = Math.max(y0 + 1, region.y + Math.round(rows.bottom / scale));
+      const snapped: Rect = { x: region.x, y: y0, w: region.w, h: y1 - y0 };
+      const snappedSize = outputSize(snapped, scale);
+      const oy = Math.max(0, Math.min(size.h - snappedSize.h, Math.round((y0 - region.y) * scale)));
+      if (snappedSize.h < size.h) {
+        cut = create(snappedSize.w, snappedSize.h);
+        const cctx = cut.getContext('2d', { alpha: false });
+        if (cctx && probeCanvas(cctx)) {
+          cctx.drawImage(canvas, 0, oy, size.w, snappedSize.h, 0, 0, size.w, snappedSize.h);
+          release(canvas);
+          canvas = null;
+          const blob = await cut.convertToBlob({ type: 'image/png' });
+          return { blob, size: snappedSize, region: snapped };
+        }
+        // No memory for the cut copy: export unsnapped rather than fail.
+      }
+    }
+    const blob = await canvas.convertToBlob({ type: 'image/png' });
+    return { blob, size, region: { ...region } };
+  } catch (err) {
+    if (isAbort(err, deps.signal)) throw err;
+    if (isAllocationError(err)) return null;
+    throw err;
   } finally {
-    canvas.width = 0;
-    canvas.height = 0;
+    release(canvas);
+    release(cut);
   }
+}
+
+/**
+ * Edge snapping on the composited base (before annotations), in output rows. Returns the rows to
+ * keep `[top, bottom)` or `null` when neither edge moves.
+ */
+function snapRows(
+  ctx: OffscreenCanvasRenderingContext2D,
+  size: Size,
+  snap: ExportSnap,
+  scale: number,
+): { top: number; bottom: number } | null {
+  const W = size.w;
+  const H = size.h;
+  let maxTop = Math.max(0, Math.floor(snap.top * scale));
+  let maxBottom = Math.max(0, Math.floor(snap.bottom * scale));
+  // The two windows never overlap, and at least one row is always kept.
+  maxTop = Math.min(maxTop, Math.floor((H - 1) / 2));
+  maxBottom = Math.min(maxBottom, H - 1 - maxTop);
+  if (maxTop <= 0 && maxBottom <= 0) return null;
+
+  const x0 = Math.floor(W * 0.1);
+  const x1 = Math.max(x0 + 1, Math.ceil(W * 0.9));
+  const blankRows = (y: number, rows: number): boolean[] => {
+    const data = ctx.getImageData(0, y, W, rows).data;
+    const out: boolean[] = [];
+    for (let r = 0; r < rows; r++) out.push(isBlankRow(data, r * W * 4, x0, x1));
+    return out;
+  };
+
+  let top = 0;
+  let bottom = H;
+  if (maxBottom > 0) {
+    const y = H - maxBottom;
+    const blank = blankRows(y, maxBottom);
+    if (!blank[maxBottom - 1]) {
+      let k = maxBottom - 2;
+      while (k >= 0 && !blank[k]) k--;
+      if (k >= 0) {
+        const r1 = k;
+        while (k >= 0 && blank[k]) k--;
+        const r0 = k + 1;
+        bottom = y + Math.min(r1 + 1, r0 + SNAP_KEEP);
+      }
+    }
+  }
+  if (maxTop > 0) {
+    const blank = blankRows(0, maxTop);
+    if (!blank[0]) {
+      let k = 1;
+      while (k < maxTop && !blank[k]) k++;
+      if (k < maxTop) {
+        const r0 = k;
+        while (k < maxTop && blank[k]) k++;
+        const r1 = k - 1;
+        top = Math.max(r0, r1 + 1 - SNAP_KEEP);
+      }
+    }
+  }
+  return top > 0 || bottom < H ? { top, bottom } : null;
+}
+
+/** All pixels in `[x0, x1)` of the row at byte offset `at` within ±SNAP_TOLERANCE per channel. */
+function isBlankRow(data: Uint8ClampedArray, at: number, x0: number, x1: number): boolean {
+  let i = at + x0 * 4;
+  let rMin = data[i] as number;
+  let rMax = rMin;
+  let gMin = data[i + 1] as number;
+  let gMax = gMin;
+  let bMin = data[i + 2] as number;
+  let bMax = bMin;
+  const end = at + x1 * 4;
+  for (i += 4; i < end; i += 4) {
+    const r = data[i] as number;
+    const g = data[i + 1] as number;
+    const b = data[i + 2] as number;
+    if (r < rMin) rMin = r;
+    else if (r > rMax) rMax = r;
+    if (g < gMin) gMin = g;
+    else if (g > gMax) gMax = g;
+    if (b < bMin) bMin = b;
+    else if (b > bMax) bMax = b;
+    if (
+      rMax - rMin > SNAP_TOLERANCE ||
+      gMax - gMin > SNAP_TOLERANCE ||
+      bMax - bMin > SNAP_TOLERANCE
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function defaultStripRows(region: Rect, scale: number, width: number): number {
@@ -108,6 +319,7 @@ async function renderStreamed(
   deps: ExportDeps,
   size: Size,
   opts: RenderExportOptions,
+  create: (w: number, h: number) => OffscreenCanvas,
 ): Promise<Blob> {
   const { region, scale, doc } = job;
   const { session, loadSlice, signal } = deps;
@@ -115,20 +327,21 @@ async function renderStreamed(
   if (W > CANVAS_MAX_SIDE) throw new RangeError(`Export too wide: ${W} px`);
   const stripRows = Math.max(1, Math.floor(opts.stripRows ?? defaultStripRows(region, scale, W)));
 
-  const canvas = new OffscreenCanvas(W, Math.min(stripRows, size.h));
+  let canvas: OffscreenCanvas | null = null;
   // Scaled strips: the base is composited 1:1 into `temp` (image px, with a 2 px margin), then
   // drawn into the strip with the same transform the single canvas uses, so strips abut. The
   // single path resamples each slice part directly, so the base can differ by about 1 px there.
   let temp: OffscreenCanvas | null = null;
   try {
+    canvas = create(W, Math.min(stripRows, size.h));
     const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
-    if (!ctx) throw new Error('No 2D context for export strip');
+    if (!ctx || !probeCanvas(ctx)) throw memoryError();
     let tctx: OffscreenCanvasRenderingContext2D | null = null;
     if (scale !== 1) {
       const th = Math.min(region.h, Math.ceil(stripRows / scale) + 6);
-      temp = new OffscreenCanvas(region.w, th);
+      temp = create(region.w, th);
       tctx = temp.getContext('2d', { alpha: false });
-      if (!tctx) throw new Error('No 2D context for export strip');
+      if (!tctx || !probeCanvas(tctx)) throw memoryError();
     }
 
     const getRows = async (y0: number, rows: number): Promise<Uint8ClampedArray> => {
@@ -161,13 +374,17 @@ async function renderStreamed(
       ...(opts.filter && { filter: opts.filter }),
       ...(signal && { signal }),
     });
+  } catch (err) {
+    // Our own RangeErrors (bad sizes) pass through; a dead strip canvas reads as out of memory.
+    const e = err as { name?: unknown; message?: unknown } | null;
+    const dead =
+      e?.name === 'IndexSizeError' ||
+      (typeof e?.message === 'string' && /alloc|memory/i.test(e.message));
+    if (isAbort(err, signal) || !dead) throw err;
+    throw memoryError();
   } finally {
-    canvas.width = 0;
-    canvas.height = 0;
-    if (temp) {
-      temp.width = 0;
-      temp.height = 0;
-    }
+    release(canvas);
+    release(temp);
   }
 }
 

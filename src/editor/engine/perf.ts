@@ -28,6 +28,10 @@ class Perf {
   /** rAF timestamps of rendered frames (for interval analysis). */
   frameStamps: number[] = [];
   copies: CopyRecord[] = [];
+  /** Base-tile loads started (any level). Should stay flat while the view is idle. */
+  tileLoads = 0;
+  /** `performance.now()` at the end of the last rendered frame. */
+  lastFrameEnd = 0;
 
   markInit(): void {
     this.initAt = performance.now();
@@ -41,6 +45,7 @@ class Perf {
   }
 
   recordFrame(ms: number, stamp: number): void {
+    this.lastFrameEnd = performance.now();
     this.frames.push(ms);
     this.frameStamps.push(stamp);
     if (this.frames.length > FRAME_SAMPLES) {

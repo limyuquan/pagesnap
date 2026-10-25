@@ -32,8 +32,13 @@ export class PageMutations {
   private readonly videos: HTMLMediaElement[] = [];
   private restored = false;
 
+  /** True once `restore()` ran. Every mutation helper is a no-op from then on. */
+  get isRestored(): boolean {
+    return this.restored;
+  }
+
   addCaptureSheet(): void {
-    if (this.sheet) return;
+    if (this.sheet || this.restored) return;
     const el = document.createElement('style');
     el.setAttribute('data-pagesnap', '');
     el.textContent = CAPTURE_CSS;
@@ -43,6 +48,7 @@ export class PageMutations {
 
   /** Set `prop: value !important` inline, remembering the original once. */
   setStyle(el: Styled, prop: string, value: string): void {
+    if (this.restored) return;
     let rec = this.saved.get(el);
     if (!rec) {
       rec = { hadStyleAttr: el.hasAttribute('style'), props: new Map() };
@@ -64,6 +70,7 @@ export class PageMutations {
 
   /** Put one property back to its original inline value (no-op if never set). */
   resetStyle(el: Styled, prop: string): void {
+    if (this.restored) return;
     const rec = this.saved.get(el);
     const orig = rec?.props.get(prop);
     if (!rec || !orig) return;
@@ -80,13 +87,14 @@ export class PageMutations {
   }
 
   makeEager(el: HTMLImageElement | HTMLIFrameElement): void {
-    if (el.loading !== 'lazy') return;
+    if (this.restored || el.loading !== 'lazy') return;
     el.loading = 'eager';
     this.lazy.push(el);
   }
 
   /** Finish finite animations (scroll-reveal etc.) and pause infinite ones (spinners). */
   settleAnimations(): void {
+    if (this.restored) return;
     let list: Animation[] = [];
     try {
       list = document.getAnimations();
@@ -110,6 +118,7 @@ export class PageMutations {
   }
 
   pauseVideos(): void {
+    if (this.restored) return;
     for (const v of document.querySelectorAll('video')) {
       if (!v.paused && !v.ended) {
         v.pause();

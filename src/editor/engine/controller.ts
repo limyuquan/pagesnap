@@ -17,6 +17,8 @@ import {
 import { newId } from '@/shared/ids';
 import type { Point, Rect } from '@/shared/types';
 import {
+  ARROW_HEAD_MIN_CSS,
+  ARROW_HEAD_WIDTHS,
   dist,
   dragHandle,
   FONT_STACK,
@@ -37,6 +39,7 @@ import {
   zoomLimits,
 } from './geometry';
 import { type Draft, Renderer } from './renderer';
+import { isInteractiveTarget, pageBy } from './shortcuts';
 import { type DrawTool, type EditorState, useEditorStore } from './store';
 
 /** Below this on-screen length (CSS px) a drag is a click: no shape is created. */
@@ -89,6 +92,24 @@ const isTypingTarget = (t: EventTarget | null): boolean =>
     t.tagName === 'INPUT' ||
     t.tagName === 'SELECT');
 
+/** Space on a page-down: it pages only if the key was tapped, not held for a drag. */
+const SPACE_TAP_MS = 500;
+
+const svgCursor = (svg: string, hot: number, fallback: string) =>
+  `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${hot} ${hot}, ${fallback}`;
+/** Pen: a 2 px dot with a white rim (design §6: drawing a stroke from a hairline is fiddly). */
+const PEN_CURSOR = svgCursor(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="2.5" fill="#000" stroke="#fff" stroke-width="1.5"/></svg>',
+  8,
+  'crosshair',
+);
+/** Highlighter: a short flat bar, like the band it draws, centred on the hot spot. */
+const HIGHLIGHT_CURSOR = svgCursor(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect x="2.5" y="5.5" width="11" height="5" rx="1" fill="#000" fill-opacity=".55" stroke="#fff" stroke-width="1.5"/><rect x="7.25" y="7.25" width="1.5" height="1.5" fill="#fff"/></svg>',
+  8,
+  'crosshair',
+);
+
 export class CanvasController {
   private readonly root: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
@@ -98,6 +119,8 @@ export class CanvasController {
   private gesture: Gesture | null = null;
   private edit: TextEdit | null = null;
   private spaceHeld = false;
+  /** Space went down at this time without a pan since (a tap pages down on key-up). */
+  private spaceTap: { at: number; shift: boolean } | null = null;
   private rect: DOMRect | null = null;
   private readonly cleanups: (() => void)[] = [];
   private lastHoverCursor = '';
@@ -306,6 +329,9 @@ export class CanvasController {
       case 'arrow': {
         if (g.shift) b = snapAngle(a, b, 45);
         if (tooShort(a, b)) return null;
+        // Shorter than 1.5 heads it would be a blob, not an arrow (design §3).
+        const head = Math.max(ARROW_HEAD_WIDTHS * size, ARROW_HEAD_MIN_CSS * dpr);
+        if (dist(a, b) < 1.5 * head) return null;
         return {
           id: g.id,
           kind: 'arrow',
@@ -421,6 +447,7 @@ export class CanvasController {
 
     if (e.button === 1 || this.spaceHeld) {
       e.preventDefault();
+      this.spaceTap = null;
       this.capture(id);
       this.gesture = {
         kind: 'pan',
@@ -695,6 +722,10 @@ export class CanvasController {
         return 'default';
       case 'text':
         return 'text';
+      case 'highlight':
+        return HIGHLIGHT_CURSOR;
+      case 'pen':
+        return PEN_CURSOR;
       default:
         return 'crosshair';
     }
@@ -750,8 +781,21 @@ export class CanvasController {
       return;
     }
     if (isTypingTarget(e.target) || this.edit) return;
+    // Space activates a focused button, link or menu item: leave it to the control.
+    if (isInteractiveTarget(e.target)) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     e.preventDefault();
+    if (down && !e.repeat && !this.spaceHeld) {
+      this.spaceTap = { at: performance.now(), shift: e.shiftKey };
+    }
+    if (!down) {
+      // A tap (no drag, not held) pages like a browser: Space down, Shift+Space up.
+      const tap = this.spaceTap;
+      this.spaceTap = null;
+      if (tap && performance.now() - tap.at < SPACE_TAP_MS && this.gesture?.kind !== 'pan') {
+        pageBy(tap.shift || e.shiftKey ? -1 : 1);
+      }
+    }
     if (this.spaceHeld === down) return;
     this.spaceHeld = down;
     this.updateCursor();
@@ -808,6 +852,21 @@ export class CanvasController {
   private onTextKey(e: KeyboardEvent): void {
     e.stopPropagation();
     if (e.isComposing || e.keyCode === 229) return;
+    const ta = this.textarea;
+    if (
+      (e.metaKey || e.ctrlKey) &&
+      !e.altKey &&
+      e.key.toLowerCase() === 'c' &&
+      ta.selectionStart === ta.selectionEnd
+    ) {
+      // "Type a note, then ⌘C": nothing selected to copy as text, so finish the note and copy
+      // the image (synchronously, inside this keydown, as the clipboard needs).
+      e.preventDefault();
+      if (e.repeat) return;
+      this.commitText();
+      useEditorStore.getState().actions.copy(e.shiftKey ? 'full' : 'default');
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       this.commitText();
@@ -873,11 +932,23 @@ export class CanvasController {
 
   private setComposite(url: string | null): void {
     if (url) this.img.src = url;
-    else this.img.removeAttribute('src');
+    else {
+      this.img.removeAttribute('src');
+      this.releaseImg();
+    }
   }
 
+  /**
+   * Right mouse down: make the composite <img> the native menu's target, but only when it is
+   * exactly what ⌘C would copy now. Otherwise the menu opens on the canvas (no "Copy image",
+   * never a stale one) and the encode jumps the queue, so the next right-click has it.
+   */
   private armImg(): void {
-    if (!this.img.getAttribute('src')) return;
+    const s = useEditorStore.getState();
+    if (!this.img.getAttribute('src') || !s._engine._compositeFresh()) {
+      s._engine._prepareComposite();
+      return;
+    }
     this.imgMenuOpen = false;
     this.img.style.pointerEvents = 'auto';
   }

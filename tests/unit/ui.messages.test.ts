@@ -1,16 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { captureNotice, copyToast, downloadToast, errorContent } from '@/editor/ui/messages';
+import type { CopyStatus, DownloadStatus } from '@/editor/engine';
+import {
+  captureNotice,
+  copyToast,
+  downloadToast,
+  errorContent,
+  innerScrollerNote,
+} from '@/editor/ui/messages';
 import type { SessionMeta } from '@/editor/ui/useSessionMeta';
 import { viewPhase } from '@/editor/ui/viewPhase';
 
 const at = 1;
 const size = { w: 1280, h: 2400 };
 
+const page = (h: number) => ({ w: 1280, h });
+
 describe('copyToast', () => {
   it('names the full page and its size', () => {
     const t = copyToast(
       { state: 'copied', request: 'default', outcome: 'full', size, tall: false, at },
-      2400,
+      page(2400),
     );
     expect(t).toMatchObject({ tone: 'ok', title: 'Copied full page', size: '1280 × 2400' });
     expect(t?.note).toBeUndefined();
@@ -19,27 +28,84 @@ describe('copyToast', () => {
   it('warns when a full copy is tall', () => {
     const t = copyToast(
       { state: 'copied', request: 'full', outcome: 'full', size, tall: true, at },
-      9000,
+      page(9000),
     );
     expect(t?.note).toMatch(/scale it down/);
   });
 
-  it('explains the smart region and points at Shift+Cmd+C', () => {
-    const t = copyToast(
-      { state: 'copied', request: 'default', outcome: 'smart', size, tall: false, at },
-      12400,
+  const scoped = (kind: string, extra: object = {}) =>
+    ({
+      state: 'copied',
+      request: 'default',
+      outcome: kind === 'fromHere' ? 'viewport' : 'smart',
+      size: { w: 1440, h: 2576 },
+      tall: false,
+      at,
+      scope: {
+        kind,
+        mode: 'fill',
+        region: { x: 0, y: 0, w: 1440, h: 2576 },
+        cssTop: 0,
+        cssBottom: 2576,
+        cssHeight: 2576,
+        pageCssHeight: 4348,
+        ...extra,
+      },
+    }) as unknown as CopyStatus;
+  const lms = { w: 1440, h: 4348 };
+
+  it('from the top: says where it stops and what ⇧⌘C adds', () => {
+    const t = copyToast(scoped('fromTop'), lms);
+    expect(t).toMatchObject({ title: 'Copied the top of the page', size: '1440 × 2576' });
+    expect(t?.note).toMatch(
+      /^From the top of the page down to 2,576 px\. .*C copies all 4,348 px\.$/,
     );
-    expect(t?.title).toBe('Copied the area around your marks');
-    expect(t?.note).toMatch(/^The page is 12,400 px tall\. .*C copies all of it\.$/);
   });
 
-  it('explains the current-view copy', () => {
-    const t = copyToast(
-      { state: 'copied', request: 'default', outcome: 'viewport', size, tall: false, at },
-      12400,
+  it('around the marks: says how much of the page', () => {
+    const t = copyToast(scoped('aroundMarks', { cssTop: 900, cssBottom: 3476 }), lms);
+    expect(t?.title).toBe('Copied around your marks');
+    expect(t?.note).toMatch(/^2,576 of 4,348 px\. .*C copies the whole page\.$/);
+  });
+
+  it('no marks: from here down', () => {
+    const t = copyToast(scoped('fromHere', { cssTop: 1200, cssBottom: 3776 }), lms);
+    expect(t?.title).toBe('Copied from here down');
+    expect(t?.note).toBe('2,576 of 4,348 px. Mark something to copy around it.');
+  });
+
+  it('marks taller than the budget', () => {
+    const t = copyToast({ ...scoped('aroundMarks'), tall: true } as CopyStatus, lms);
+    expect(t?.note).toMatch(/span a tall area/);
+  });
+
+  it('reads v0.1 outcomes without a scope, deriving CSS heights from the PNG width', () => {
+    const smart = copyToast(
+      {
+        state: 'copied',
+        request: 'default',
+        outcome: 'smart',
+        size: { w: 1280, h: 1184 },
+        tall: false,
+        at,
+      },
+      page(12400),
     );
-    expect(t?.title).toBe('Copied the current view');
-    expect(t?.note).toMatch(/Mark something to copy around it, or .*C for all of it\.$/);
+    expect(smart?.title).toBe('Copied around your marks');
+    expect(smart?.note).toMatch(/^1,184 of 12,400 px\./);
+    const view = copyToast(
+      {
+        state: 'copied',
+        request: 'default',
+        outcome: 'viewport',
+        size: { w: 2560, h: 1600 },
+        tall: false,
+        at,
+      },
+      page(12400),
+    );
+    expect(view?.title).toBe('Copied from here down');
+    expect(view?.note).toMatch(/^800 of 12,400 px\./);
   });
 
   it('asks for focus when the page lost it', () => {
@@ -51,9 +117,26 @@ describe('copyToast', () => {
     expect(t?.title).toMatch(/^Click the page, then .*C again$/);
   });
 
+  it('early ⌘C says it is still loading; timeouts and raw errors read as sentences', () => {
+    const fail = (reason: string, message: string) =>
+      copyToast(
+        { state: 'failed', request: 'default', reason, message, at } as unknown as CopyStatus,
+        null,
+      );
+    expect(fail('loading', 'Still loading')?.title).toBe('Still loading the capture…');
+    expect(fail('error', 'Nothing to copy yet.')?.title).toBe('Still loading the capture…');
+    expect(fail('timeout', 'TIMEOUT')).toMatchObject({
+      tone: 'warn',
+      title: 'Copying took too long',
+    });
+    const raw = fail('error', 'DataCloneError');
+    expect(raw?.title).toBe('Couldn’t copy the image');
+    expect(raw?.note).not.toContain('DataCloneError');
+  });
+
   it('is silent when idle and busy while copying', () => {
-    expect(copyToast({ state: 'idle' }, 100)).toBeNull();
-    expect(copyToast({ state: 'copying', request: 'default' }, 100)?.tone).toBe('busy');
+    expect(copyToast({ state: 'idle' }, page(100))).toBeNull();
+    expect(copyToast({ state: 'copying', request: 'default' }, page(100))?.tone).toBe('busy');
   });
 });
 
@@ -62,6 +145,16 @@ describe('downloadToast', () => {
     expect(
       downloadToast({ state: 'saved', filename: 'a.png', size: { w: 10, h: 20 }, at }),
     ).toMatchObject({ title: 'Saved a.png', size: '10 × 20' });
+  });
+
+  it('explains a timeout without a raw code', () => {
+    const t = downloadToast({
+      state: 'failed',
+      message: 'TIMEOUT',
+      reason: 'timeout',
+      at,
+    } as DownloadStatus);
+    expect(t?.title).toBe('Saving took too long');
   });
 });
 
@@ -75,6 +168,7 @@ const meta = (over: Partial<SessionMeta>): SessionMeta => ({
   css: { w: 1280, h: 4200 },
   mode: 'full',
   progress: { done: 1, total: 1 },
+  updatedAt: 0,
   ...over,
 });
 
@@ -119,13 +213,21 @@ describe('captureNotice', () => {
           ],
         }),
       ),
-    ).toMatchObject({ tone: 'warn', code: 'HEIGHT_CHANGED', text: moved, all: [moved, 'panel'] });
+    ).toMatchObject({ tone: 'warn', code: 'HEIGHT_CHANGED', text: moved, all: [moved] });
   });
 
-  it('treats an expanded inner scroller as information, shown until seen', () => {
+  it('keeps an expanded inner scroller out of the strip, in the title tooltip', () => {
     const m = meta({ warnings: [{ code: 'INNER_SCROLLER', message: 'Expanded in place.' }] });
-    expect(captureNotice(m)).toMatchObject({ tone: 'info', code: 'INNER_SCROLLER' });
-    expect(captureNotice(m, new Set(['INNER_SCROLLER']))).toBeNull();
+    expect(captureNotice(m)).toBeNull();
+    expect(innerScrollerNote(m)).toBe('Captured the scrolling panel as one page.');
+    expect(innerScrollerNote(meta({}))).toBeNull();
+  });
+
+  it('shows a page that would not scroll', () => {
+    const msg = 'A dialog stopped the page from scrolling, so one screen was captured.';
+    expect(
+      captureNotice(meta({ warnings: [{ code: 'NOT_SCROLLABLE', message: msg }] })),
+    ).toMatchObject({ tone: 'warn', code: 'NOT_SCROLLABLE', text: msg });
   });
 
   it('says nothing for a clean capture', () => {
@@ -141,9 +243,17 @@ describe('errorContent', () => {
     expect(errorContent({ code: 'NO_SESSION', message: '' }).title).toBe(
       'This capture isn’t here anymore',
     );
-    expect(errorContent({ code: 'CAPTURE_FAILED', message: 'Odd failure' }).body).toBe(
-      'Odd failure',
+    expect(errorContent({ code: 'CAPTURE_FAILED', message: 'Odd failure.' }).body).toBe(
+      'Odd failure.',
     );
+    expect(errorContent({ code: 'LOAD_FAILED', message: 'x' }).retry).toBe('reload');
+    expect(
+      errorContent({ code: 'CAPTURE_FAILED', message: '', captureCode: 'INTERRUPTED' }).title,
+    ).toBe('The capture stopped responding');
+    const esc = 'You pressed Esc, so the capture stopped early.';
+    expect(
+      errorContent({ code: 'CAPTURE_FAILED', message: esc, captureCode: 'ABORTED_BY_USER' }).body,
+    ).toBe(esc);
   });
 });
 

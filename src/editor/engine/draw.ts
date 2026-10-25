@@ -52,10 +52,10 @@ export interface DrawOptions {
   cull?: Rect | null;
 }
 
-/** Contrast shadow (03 §5): blur 3 CSS px, 35% black, 1 CSS px down. */
-export const SHADOW_BLUR_CSS = 3;
+/** Contrast shadow (design review §3): blur 2 CSS px, 22% black, 1 CSS px down. */
+export const SHADOW_BLUR_CSS = 2;
 export const SHADOW_OFFSET_CSS = 1;
-export const SHADOW_COLOR = 'rgba(0,0,0,0.35)';
+export const SHADOW_COLOR = 'rgba(0,0,0,0.22)';
 
 /** Rect corner radius, CSS px. */
 export const RECT_RADIUS_CSS = 4;

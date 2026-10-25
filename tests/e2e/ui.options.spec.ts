@@ -15,7 +15,7 @@ test('options page saves settings', async ({ context, extensionId, serviceWorker
       return (await chrome.storage.local.get('settings')).settings as
         | {
             copy: { resolution: string };
-            editor: { shadow: boolean; defaultColor?: string };
+            editor: { shadow: boolean; defaultColor?: string; copyScope?: string };
           }
         | undefined;
     });
@@ -27,6 +27,13 @@ test('options page saves settings', async ({ context, extensionId, serviceWorker
   await full.check();
   await expect.poll(async () => (await stored())?.copy.resolution).toBe('native');
   await expect(page.getByRole('status')).toHaveText('Saved');
+
+  // ⌘C on tall pages.
+  const fill = page.getByRole('radio', { name: /As much as an AI can read/ });
+  const tight = page.getByRole('radio', { name: /Just around your marks/ });
+  await expect(fill).toBeChecked();
+  await tight.check();
+  await expect.poll(async () => (await stored())?.editor.copyScope).toBe('tight');
 
   // Starting colour.
   const colours = page.getByRole('radiogroup', { name: 'Starting colour' });
@@ -47,6 +54,7 @@ test('options page saves settings', async ({ context, extensionId, serviceWorker
   // Survives a reload.
   await page.reload();
   await expect(page.getByRole('radio', { name: /Full resolution/ })).toBeChecked();
+  await expect(page.getByRole('radio', { name: /Just around your marks/ })).toBeChecked();
   await expect(
     page.getByRole('radiogroup', { name: 'Starting colour' }).getByRole('radio', { name: 'Blue' }),
   ).toHaveAttribute('aria-checked', 'true');
@@ -60,6 +68,40 @@ test('options page saves settings', async ({ context, extensionId, serviceWorker
     .poll(async () => (await uiState(editor)).styles.arrow.color.toUpperCase())
     .toBe('#0A84FF');
   // The highlighter keeps yellow.
-  expect((await uiState(editor)).styles.highlight.color.toUpperCase()).toBe('#FFD60A');
+  expect((await uiState(editor)).styles.highlight.color.toUpperCase()).toBe('#FFCC00');
   void real;
+});
+
+test('delete all captures asks in place, then deletes', async ({
+  context,
+  extensionId,
+  pagesnap,
+}) => {
+  await pagesnap.seedSession({ cssW: 1280, cssH: 1200 });
+  await pagesnap.seedSession({ cssW: 1280, cssH: 1600 });
+  const page = await context.newPage();
+  let dialogs = 0;
+  page.on('dialog', (d) => {
+    dialogs++;
+    void d.dismiss();
+  });
+  await page.goto(`chrome-extension://${extensionId}/options.html`);
+  const usage = page.getByTestId('storage-usage');
+  await expect(usage).toContainText(/^2 captures, .+ on this device\./);
+
+  // Cancel leaves everything.
+  await page.getByRole('button', { name: 'Delete all captures…' }).click();
+  await expect(page.getByText('Delete 2 captures?')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeFocused();
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(usage).toContainText('2 captures');
+
+  // Confirm deletes, with no browser dialog anywhere.
+  await page.getByRole('button', { name: 'Delete all captures…' }).click();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(usage).toHaveText('Deleted 2 captures.');
+  expect(dialogs).toBe(0);
+  await page.reload();
+  await expect(page.getByTestId('storage-usage')).toHaveText('No captures are stored.');
+  await expect(page.getByRole('button', { name: 'Delete all captures…' })).toBeDisabled();
 });

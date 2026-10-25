@@ -54,9 +54,9 @@ export const UnderlineIcon = (p: IconProps) => (
 
 export const HighlightIcon = (p: IconProps) => (
   <Svg {...p}>
-    <path d="M3.25 17h7" strokeWidth={2.5} strokeLinecap="butt" opacity={0.45} />
-    <path d="m12.4 3.4 4.2 4.2-6.9 6.9H5.5v-4.2z" />
-    <path d="m10.3 5.5 4.2 4.2" />
+    <path d="M3.25 17.25h7.5" strokeWidth={3} strokeLinecap="butt" opacity={0.75} />
+    <path d="m11.7 4.1 4.2 4.2-6.2 6.2H5.5v-4.2z" />
+    <path d="m9.6 6.2 4.2 4.2" />
   </Svg>
 );
 

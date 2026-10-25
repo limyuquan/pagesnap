@@ -30,22 +30,33 @@ import { getDoc } from '@/shared/db';
 import { waitForFinalSession } from '@/shared/handoff';
 import { DEFAULT_SETTINGS, getSettings, type Settings, watchSettings } from '@/shared/settings';
 import type { CaptureSource } from '@/shared/source';
-import type { CaptureSession, Point, SessionId, Size } from '@/shared/types';
-import { Autosaver, readBackupDoc } from './autosave';
+import type { CaptureSession, Point, Rect, SessionId, Size } from '@/shared/types';
+import { Autosaver, DocSync, readBackupDoc } from './autosave';
 import { isNotFocusedError, writeImageToClipboard } from './clipboard';
-import { Exporter } from './exporter';
+import { Exporter, exportTimeoutMs } from './exporter';
 import { exportFilename } from './filename';
 import {
   clampCamera,
   fitWidthCamera,
   fitWidthZoom,
+  translateShape,
   visibleRect,
   zoomAround,
   zoomLimits,
 } from './geometry';
 import * as hist from './history';
 import { perf } from './perf';
-import { type ExportPlan, nativePlan, planCopy, planDownload, planKey } from './scope';
+import {
+  type CopyScopeKind,
+  type CopyScopeMode,
+  type ExportPlan,
+  nativePlan,
+  planCopy,
+  planDownload,
+  planKey,
+} from './scope';
+
+export type { CopyScopeKind, CopyScopeMode } from './scope';
 
 // ---------------------------------------------------------------- CONTRACT: types
 
@@ -126,6 +137,21 @@ export type CopyRequest = 'default' | 'full';
  */
 export type CopyOutcome = 'full' | 'smart' | 'viewport';
 
+/** What a copy contained, for the toast (design review §4/§5). */
+export interface CopyScopeInfo {
+  kind: CopyScopeKind;
+  /** `settings.editor.copyScope` in effect. */
+  mode: CopyScopeMode;
+  /** The copied region, image px (after edge snapping). */
+  region: Rect;
+  /** Its top and bottom edges and height, CSS px of the page (rounded). */
+  cssTop: number;
+  cssBottom: number;
+  cssHeight: number;
+  /** The whole page's height, CSS px (rounded). */
+  pageCssHeight: number;
+}
+
 export type CopyStatus =
   | { state: 'idle' }
   | { state: 'copying'; request: CopyRequest }
@@ -137,13 +163,19 @@ export type CopyStatus =
       size: Size;
       /** Tall result an AI will downscale noticeably (long edge > 2576 CSS px). */
       tall: boolean;
+      /** Which part of the page was copied. Always set by the engine (optional for old literals). */
+      scope?: CopyScopeInfo;
       at: number;
     }
   | {
       state: 'failed';
       request: CopyRequest;
-      /** `not-focused`: the page lost focus; UI should say "Click the page, then ⌘C again". */
-      reason: 'not-focused' | 'error';
+      /**
+       * `not-focused`: the page lost focus; UI should say "Click the page, then ⌘C again".
+       * `loading`: the editor isn't ready yet ("Still loading…"). `timeout`: the export or the
+       * clipboard write didn't finish in time.
+       */
+      reason: 'not-focused' | 'error' | 'loading' | 'timeout';
       message: string;
       at: number;
     };
@@ -152,7 +184,7 @@ export type DownloadStatus =
   | { state: 'idle' }
   | { state: 'saving' }
   | { state: 'saved'; filename: string; size: Size; at: number }
-  | { state: 'failed'; message: string; at: number };
+  | { state: 'failed'; message: string; at: number; reason?: 'loading' | 'timeout' | 'error' };
 
 // ---------------------------------------------------------------- CONTRACT: actions
 
@@ -201,9 +233,15 @@ export interface EditorActions {
 export interface EngineActions {
   /** Commit a new doc as one undo step. Optionally replace the selection. */
   _commit(doc: AnnotationDoc, selection?: readonly ShapeId[]): void;
+  /** Move the selection by (dx, dy) image px; a burst of nudges is one undo step. */
+  _nudge(dx: number, dy: number): void;
+  /** Is the right-click composite the current default copy? */
+  _compositeFresh(): boolean;
+  /** Encode the right-click composite now, ahead of everything else. */
+  _prepareComposite(): void;
   /** The canvas element's CSS size changed. */
   _setViewport(size: Size): void;
-  /** Camera change from user input (wheel, pinch, pan). Leaves fit-width mode. */
+  /** Camera change from user input (wheel, pinch, pan). A zoom change leaves fit-width mode. */
   _panZoom(camera: Camera): void;
   _setEditingText(id: ShapeId | null): void;
   /** The first frame with every visible tile has been painted. */
@@ -242,6 +280,11 @@ export interface EditorState {
 
   copy: CopyStatus;
   download: DownloadStatus;
+  /**
+   * When this tab last adopted a newer doc written by another editor tab of the same capture
+   * (its undo history restarts there). `null` if never.
+   */
+  externalEditAt: number | null;
 
   actions: EditorActions;
 
@@ -254,6 +297,8 @@ export interface EditorState {
   _compositeUrl: string | null;
   /** Doc rev the composite was rendered from. */
   _compositeRev: number;
+  /** Export key (session, rev, default-copy plan) of the composite; null when there is none. */
+  _compositeKey: string | null;
   _engine: EngineActions;
 }
 
@@ -267,6 +312,9 @@ export const selectZoomPercent = (s: EditorState): number =>
   Math.round(s.camera.zoom * (s.session?.dpr ?? 1) * 100);
 
 export const selectIsReady = (s: EditorState): boolean => s.load.phase === 'ready';
+
+/** True while the camera follows fit-width (the zoom label can say "Fit"). */
+export const selectIsFitWidth = (s: EditorState): boolean => s._fit;
 
 // ---------------------------------------------------------------- defaults
 
@@ -296,7 +344,9 @@ export function seedStyles(
 }
 
 /** Idle delay before pre-encoding the copy after a commit (03 §4.2). */
-export const PREWARM_DELAY_MS = 400;
+export const PREWARM_DELAY_MS = 250;
+/** Keyboard nudges this close together are one undo step. */
+const NUDGE_COALESCE_MS = 1_000;
 
 // ---------------------------------------------------------------- helpers
 
@@ -376,6 +426,58 @@ let unwatchSettings: (() => void) | null = null;
 let unsubscribeStore: (() => void) | null = null;
 let copySeq = 0;
 let initToken = 0;
+let docSync: DocSync | null = null;
+/** The last doc adopted from another tab (not re-broadcast). */
+let adoptedDoc: AnnotationDoc | null = null;
+let lastNudge: { at: number; ids: string } | null = null;
+
+/** `settings.editor.copyScope`, read defensively (older settings don't have it). */
+function copyScopeOf(settings: Settings): CopyScopeMode {
+  const v = (settings.editor as { copyScope?: unknown } | undefined)?.copyScope;
+  return v === 'tight' ? 'tight' : 'fill';
+}
+
+function scopeInfo(
+  plan: ExportPlan,
+  region: Rect,
+  session: CaptureSession,
+  mode: CopyScopeMode,
+): CopyScopeInfo {
+  const d = session.dpr || 1;
+  const cssTop = Math.round(region.y / d);
+  const cssBottom = Math.round((region.y + region.h) / d);
+  return {
+    kind: plan.kind,
+    mode,
+    region: { ...region },
+    cssTop,
+    cssBottom,
+    cssHeight: cssBottom - cssTop,
+    pageCssHeight: Math.round(session.image.h / d),
+  };
+}
+
+function isTimeout(err: unknown): boolean {
+  const n = (err as { name?: string })?.name;
+  return n === 'TimeoutError';
+}
+
+/** Reject with a `TimeoutError` if `p` takes longer than `ms`. */
+function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new DOMException(message, 'TimeoutError')), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e: unknown) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+}
 
 function getExporter(): Exporter {
   exporter ??= new Exporter();
@@ -398,11 +500,13 @@ const INITIAL = {
   viewport: { w: 0, h: 0 },
   copy: { state: 'idle' } as CopyStatus,
   download: { state: 'idle' } as DownloadStatus,
+  externalEditAt: null,
   _history: null,
   _settings: DEFAULT_SETTINGS,
   _fit: true,
   _compositeUrl: null,
   _compositeRev: -1,
+  _compositeKey: null,
 } satisfies Partial<EditorState>;
 
 export const useEditorStore = create<EditorState>()((set, get) => {
@@ -454,28 +558,42 @@ export const useEditorStore = create<EditorState>()((set, get) => {
       view: visibleRect(s.camera, s.viewport),
       fullMaxCssHeight: s._settings.copy.fullMaxCssHeight,
       resolution: s._settings.copy.resolution,
+      scope: copyScopeOf(s._settings),
     });
   };
 
-  /** Pre-encode the default copy and the right-click composite for the current rev (03 §4.2). */
-  const prewarm = () => {
+  /** Cache key of the right-click composite: the default copy of this rev. */
+  const compositeKey = (s = get()): string | null => {
+    const plan = planFor('default', s);
+    return plan && s.doc ? `${s.doc.sessionId}|${planKey(s.doc.rev, plan)}` : null;
+  };
+
+  const setComposite = (url: string | null, key: string | null, rev: number) => {
+    const old = get()._compositeUrl;
+    if (old === url) return;
+    set({ _compositeUrl: url, _compositeKey: key, _compositeRev: url ? rev : -1 });
+    // Give the <img> time to switch (or an open menu to finish) before freeing the old one.
+    if (old) setTimeout(() => URL.revokeObjectURL(old), 1_000);
+  };
+
+  /**
+   * Pre-encode the default copy (03 §4.2). The same PNG backs the right-click "Copy image"
+   * `<img>`, so it is small (≤ the AI budget) and ready soon after every edit.
+   */
+  const prewarm = (priority: 'low' | 'high' = 'low') => {
     const s = get();
-    if (!s.doc || !s.session || s.load.phase !== 'ready') return;
+    if (!s.doc || !s.session || (s.load.phase !== 'ready' && s.load.phase !== 'loading')) return;
     const ex = getExporter();
     ex.cancelStale(s.doc.rev);
     const def = planFor('default', s);
-    const full = planFor('full', s);
-    if (!def || !full) return;
-    void ex.render(s.doc, def, { priority: 'low' }).promise.catch(() => {});
-    // The hidden right-click <img>: the full copy-resolution composite.
+    const key = compositeKey(s);
+    if (!def || !key || s._compositeKey === key) return;
     const doc = s.doc;
-    ex.render(doc, full, { priority: 'low' }).promise.then(
+    ex.render(doc, def, { priority, timeoutMs: exportTimeoutMs(def.size) }).promise.then(
       (r) => {
-        if (get().doc?.rev !== doc.rev) return;
-        const old = get()._compositeUrl;
-        set({ _compositeUrl: URL.createObjectURL(r.blob), _compositeRev: doc.rev });
-        // Give the <img> time to switch before freeing the old one.
-        if (old) setTimeout(() => URL.revokeObjectURL(old), 1_000);
+        // Only if it is still what ⌘C would copy (no edit, no scroll meanwhile).
+        if (compositeKey() !== key) return;
+        setComposite(URL.createObjectURL(r.blob), key, doc.rev);
       },
       () => {},
     );
@@ -491,7 +609,29 @@ export const useEditorStore = create<EditorState>()((set, get) => {
 
   const engine: EngineActions = {
     _commit: (doc, selection) => {
+      lastNudge = null;
       commitShapes(doc.shapes, selection);
+    },
+    _nudge: (dx, dy) => {
+      const { _history: h, selection, doc } = get();
+      if (!h || !doc || selection.length === 0 || (dx === 0 && dy === 0)) return;
+      const sel = new Set(selection);
+      const shapes = doc.shapes.map((sh) => (sel.has(sh.id) ? translateShape(sh, dx, dy) : sh));
+      const ids = [...selection].sort().join(',');
+      const now = Date.now();
+      const burst = lastNudge && lastNudge.ids === ids && now - lastNudge.at < NUDGE_COALESCE_MS;
+      lastNudge = { at: now, ids };
+      const next = { ...h.present, shapes };
+      applyHistory(burst && hist.canUndo(h) ? hist.amend(h, next) : hist.commit(h, next));
+    },
+    _compositeFresh: () => {
+      const s = get();
+      return !!s._compositeUrl && s._compositeKey !== null && s._compositeKey === compositeKey(s);
+    },
+    _prepareComposite: () => {
+      if (prewarmTimer) clearTimeout(prewarmTimer);
+      prewarmTimer = null;
+      prewarm('high');
     },
     _setViewport: (size) => {
       const prev = get().viewport;
@@ -511,21 +651,29 @@ export const useEditorStore = create<EditorState>()((set, get) => {
         setCam(camera, false);
       }
     },
-    _panZoom: (camera) => setCam(camera, false),
+    // Scrolling at the fit zoom keeps following fit-width (a window resize refits); any zoom
+    // change leaves it.
+    _panZoom: (camera) => setCam(camera, get()._fit && camera.zoom === get().camera.zoom),
     _setEditingText: (id) => set({ editingTextId: id }),
     _firstPaint: () => {
       if (get().load.phase !== 'loading') return;
       perf.markFirstTiles();
       set({ load: { phase: 'ready' } });
-      schedulePrewarm(50);
+      // Usually already running since init; this makes sure (and is a no-op when it is).
+      schedulePrewarm(0);
     },
     _planCopy: (request) => planFor(request),
     _exportNative: async (request) => {
       const s = get();
       const plan = planFor(request, s);
       if (!plan || !s.doc) throw new Error('NOT_READY');
-      return (await getExporter().render(s.doc, nativePlan(plan), { priority: 'high' }).promise)
-        .blob;
+      const native = nativePlan(plan);
+      return (
+        await getExporter().render(s.doc, native, {
+          priority: 'high',
+          timeoutMs: exportTimeoutMs(native.size),
+        }).promise
+      ).blob;
     },
     _reset: () => {
       initToken++;
@@ -539,6 +687,10 @@ export const useEditorStore = create<EditorState>()((set, get) => {
       unwatchSettings = null;
       unsubscribeStore?.();
       unsubscribeStore = null;
+      docSync?.dispose();
+      docSync = null;
+      adoptedDoc = null;
+      lastNudge = null;
       get().source?.dispose();
       const url = get()._compositeUrl;
       if (url) URL.revokeObjectURL(url);
@@ -621,7 +773,11 @@ export const useEditorStore = create<EditorState>()((set, get) => {
       const image = { ...session.image, dpr: session.dpr };
       const backup = migrateDoc(readBackupDoc(sessionId));
       let migrated = migrateDoc(stored);
-      if (backup && (!migrated || backup.rev > migrated.rev)) migrated = backup;
+      let fromBackup = false;
+      if (backup && (!migrated || backup.rev > migrated.rev)) {
+        migrated = backup;
+        fromBackup = true;
+      }
       const doc =
         migrated &&
         migrated.sessionId === sessionId &&
@@ -661,22 +817,47 @@ export const useEditorStore = create<EditorState>()((set, get) => {
 
       autosaver?.dispose();
       autosaver = new Autosaver();
+      // The sessionStorage mirror was newer than IDB (the tab reloaded before the IDB write
+      // landed): write it back now, or closing the tab would lose it.
+      if (fromBackup && doc === migrated) autosaver.schedule(doc);
+
+      // Other editor tabs on this capture: the newest doc wins in every tab.
+      docSync?.dispose();
+      docSync = new DocSync(
+        sessionId,
+        () => get().doc,
+        (remote) => {
+          if (stale()) return;
+          const cur = get();
+          if (!cur.doc || remote.image.w !== cur.doc.image.w || remote.image.h !== cur.doc.image.h)
+            return;
+          adoptedDoc = remote;
+          lastNudge = null;
+          applyHistory(hist.reset(remote));
+          set({ externalEditAt: Date.now() });
+        },
+      );
+
       unsubscribeStore?.();
       let lastDoc = doc;
       let lastCam = camera;
       unsubscribeStore = useEditorStore.subscribe((s) => {
         if (s.doc && s.doc !== lastDoc) {
           lastDoc = s.doc;
+          // The right-click image must never show an older doc: drop it at once.
+          if (s._compositeUrl && s._compositeRev !== s.doc.rev) setComposite(null, null, -1);
           autosaver?.schedule(s.doc);
+          if (s.doc !== adoptedDoc) docSync?.publish(s.doc);
           schedulePrewarm();
         } else if (s.camera !== lastCam) {
           lastCam = s.camera;
-          // The `viewport` copy outcome follows the view: re-warm once scrolling settles.
-          if (s.load.phase === 'ready' && planFor('default', s)?.outcome === 'viewport') {
-            schedulePrewarm(600);
-          }
+          // "From here down" follows the view: re-warm once scrolling settles.
+          if (s.load.phase === 'ready' && s._compositeKey !== compositeKey(s)) schedulePrewarm(300);
         }
       });
+      // Start the default copy (and the right-click image) right away, while the first tiles
+      // decode in their own worker: the first ⌘C on a huge page shouldn't wait for it.
+      schedulePrewarm(0);
     },
 
     setTool: (tool) => {
@@ -796,38 +977,48 @@ export const useEditorStore = create<EditorState>()((set, get) => {
     copy: (request) => {
       const s = get();
       const seq = ++copySeq;
-      const plan = planFor(request, s);
-      if (!plan || !s.doc || s.load.phase !== 'ready') {
+      const plan = s.load.phase === 'ready' ? planFor(request, s) : null;
+      if (!plan || !s.doc || !s.session) {
+        const failedLoad = s.load.phase === 'error';
         set({
           copy: {
             state: 'failed',
             request,
-            reason: 'error',
-            message: 'Nothing to copy yet.',
+            reason: failedLoad ? 'error' : 'loading',
+            message: failedLoad ? 'There is nothing to copy.' : 'Still loading',
             at: Date.now(),
           },
         });
         return;
       }
       const ex = getExporter();
-      const hit = ex.peek(s.doc, plan) !== null;
-      const handle = ex.render(s.doc, plan, { priority: 'high' });
+      const doc = s.doc;
+      const session = s.session;
+      const mode = copyScopeOf(s._settings);
+      const hit = ex.peek(doc, plan) !== null;
+      const timeoutMs = exportTimeoutMs(plan.size);
+      const handle = ex.render(doc, plan, { priority: 'high', timeoutMs });
       // The user is waiting: stop background prewarms (re-run once this copy is done).
       ex.cancelStale(Number.POSITIVE_INFINITY);
       const t0 = performance.now();
       const blob = handle.promise.then((r) => r.blob);
       set({ copy: { state: 'copying', request } });
       // Synchronous call inside the user's key/click handler: focus and activation are checked
-      // now, the PNG may arrive later (03 §4.2).
-      writeImageToClipboard(blob).then(
-        () => {
+      // now, the PNG may arrive later (03 §4.2). The write itself can hang (headless, a stuck
+      // blob), so it gets a deadline too.
+      withTimeout(
+        writeImageToClipboard(blob).then(() => handle.promise),
+        timeoutMs + 5_000,
+        'Copying took too long',
+      ).then(
+        (r) => {
           perf.recordCopy({
             request,
             outcome: plan.outcome,
             ms: performance.now() - t0,
             cacheHit: hit,
-            size: plan.size,
-            key: planKey(s.doc?.rev ?? 0, plan),
+            size: r.size,
+            key: planKey(doc.rev, plan),
           });
           schedulePrewarm();
           if (seq !== copySeq) return;
@@ -836,21 +1027,28 @@ export const useEditorStore = create<EditorState>()((set, get) => {
               state: 'copied',
               request,
               outcome: plan.outcome,
-              size: plan.size,
+              size: r.size,
               tall: plan.tall,
+              scope: scopeInfo(plan, r.region ?? plan.region, session, mode),
               at: Date.now(),
             },
           });
         },
         (err: unknown) => {
+          schedulePrewarm();
           if (seq !== copySeq) return;
           const notFocused = isNotFocusedError(err);
+          const timedOut = isTimeout(err);
           set({
             copy: {
               state: 'failed',
               request,
-              reason: notFocused ? 'not-focused' : 'error',
-              message: notFocused ? 'Click the page, then ⌘C again' : errorCode(err),
+              reason: notFocused ? 'not-focused' : timedOut ? 'timeout' : 'error',
+              message: notFocused
+                ? 'Click the page, then ⌘C again'
+                : timedOut
+                  ? 'Copying took too long.'
+                  : errorCode(err),
               at: Date.now(),
             },
           });
@@ -860,8 +1058,19 @@ export const useEditorStore = create<EditorState>()((set, get) => {
 
     download: () => {
       const s = get();
-      if (!s.session || !s.doc || s.load.phase !== 'ready') return;
       if (s.download.state === 'saving') return;
+      if (!s.session || !s.doc || s.load.phase !== 'ready') {
+        const failedLoad = s.load.phase === 'error';
+        set({
+          download: {
+            state: 'failed',
+            reason: failedLoad ? 'error' : 'loading',
+            message: failedLoad ? 'There is nothing to save.' : 'Still loading',
+            at: Date.now(),
+          },
+        });
+        return;
+      }
       const plan = planDownload(s.session.image, s.session.dpr);
       const filename = exportFilename({
         url: s.session.url,
@@ -870,7 +1079,10 @@ export const useEditorStore = create<EditorState>()((set, get) => {
       });
       set({ download: { state: 'saving' } });
       const ex = getExporter();
-      const job = ex.render(s.doc, plan, { priority: 'high' });
+      const job = ex.render(s.doc, plan, {
+        priority: 'high',
+        timeoutMs: exportTimeoutMs(plan.size),
+      });
       ex.cancelStale(Number.POSITIVE_INFINITY);
       job.promise
         .finally(() => schedulePrewarm())
@@ -885,11 +1097,20 @@ export const useEditorStore = create<EditorState>()((set, get) => {
             document.body.append(a);
             a.click();
             a.remove();
-            setTimeout(() => URL.revokeObjectURL(url), 60_000);
+            // The download holds its own reference once it starts; don't pin a 50 MB blob.
+            setTimeout(() => URL.revokeObjectURL(url), 10_000);
             set({ download: { state: 'saved', filename, size: r.size, at: Date.now() } });
           },
           (err: unknown) => {
-            set({ download: { state: 'failed', message: errorCode(err), at: Date.now() } });
+            const timedOut = isTimeout(err);
+            set({
+              download: {
+                state: 'failed',
+                reason: timedOut ? 'timeout' : 'error',
+                message: timedOut ? 'Saving took too long.' : errorCode(err),
+                at: Date.now(),
+              },
+            });
           },
         );
     },

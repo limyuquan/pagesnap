@@ -12,7 +12,7 @@ const nf = new Intl.NumberFormat('en-US');
 export const px = (n: number) => `${nf.format(Math.round(n))} px`;
 export const dims = (s: { w: number; h: number }) => `${Math.round(s.w)} × ${Math.round(s.h)}`;
 
-export type Tone = 'ok' | 'busy' | 'warn';
+export type Tone = 'ok' | 'busy' | 'warn' | 'info';
 
 export interface ToastContent {
   tone: Tone;
@@ -23,18 +23,81 @@ export interface ToastContent {
   note?: string;
 }
 
-/** `pageCssH` is the full page height in CSS px (`session.css.h`). */
-export function copyToast(copy: CopyStatus, pageCssH: number | null): ToastContent | null {
-  const all = `${combo('mod+shift+c')} copies all of it`;
-  const tall = pageCssH != null ? `The page is ${px(pageCssH)} tall.` : 'The page is very tall.';
+/**
+ * What a default copy contained, from the user's point of view (design review §4/§5):
+ * - `full`: the whole page;
+ * - `fromTop`: the page from its top down to the AI size budget, marks included;
+ * - `aroundMarks`: a window of the page around the marks;
+ * - `fromHere`: no marks, so the page from the current view down.
+ */
+export type ScopeKind = 'full' | 'fromTop' | 'aroundMarks' | 'fromHere';
+
+const SCOPE_KINDS: ReadonlySet<string> = new Set(['full', 'fromTop', 'aroundMarks', 'fromHere']);
+
+/**
+ * The scope kind of a `copied` status. Reads the engine's `scope.kind` (or `kind`) when present
+ * and falls back to the v0.1 `outcome` names (`smart` → around the marks, or from the top when
+ * the region starts at 0; `viewport` → from here down).
+ */
+export function scopeKind(copy: Extract<CopyStatus, { state: 'copied' }>): ScopeKind {
+  const c = copy as unknown as {
+    outcome?: string;
+    kind?: string;
+    scope?: string | { kind?: string };
+    region?: { y?: number };
+  };
+  const raw =
+    (typeof c.scope === 'string' ? c.scope : c.scope?.kind) ?? c.kind ?? c.outcome ?? 'full';
+  if (SCOPE_KINDS.has(raw)) return raw as ScopeKind;
+  if (raw === 'viewport') return 'fromHere';
+  if (raw === 'smart') return c.region?.y === 0 ? 'fromTop' : 'aroundMarks';
+  return 'full';
+}
+
+interface ScopeInfoLike {
+  kind?: string;
+  cssTop?: number;
+  cssBottom?: number;
+  cssHeight?: number;
+  pageCssHeight?: number;
+}
+
+/** The engine's `copied.scope` (CONTRACTS §8, F2), when present. */
+function scopeInfo(copy: Extract<CopyStatus, { state: 'copied' }>): ScopeInfoLike | null {
+  const sc = (copy as unknown as { scope?: unknown }).scope;
+  return sc && typeof sc === 'object' ? (sc as ScopeInfoLike) : null;
+}
+
+/** Page size in CSS px (`session.css`). */
+export type PageCss = { w: number; h: number } | null;
+
+/** Message codes and phrases that mean "the export didn't finish in time". */
+const TIMEOUT_RE = /time ?out|timed out|took too long/i;
+/** "The capture isn't on screen yet" (early ⌘C). */
+const LOADING_RE = /nothing to copy yet|still loading|not ready/i;
+
+/** Keep engine messages that read as a sentence; hide raw codes and stack-ish strings. */
+function humanMessage(message: string | undefined): string {
+  const m = message?.trim() ?? '';
+  return /^[A-Z][^_{}<>]*[.!?]$/.test(m) && m.includes(' ') && m.length <= 140 ? m : '';
+}
+
+export function copyToast(copy: CopyStatus, page: PageCss): ToastContent | null {
+  const fullKey = combo('mod+shift+c');
+  const pageH = page?.h ?? null;
   switch (copy.state) {
     case 'idle':
       return null;
-    case 'copying':
+    case 'copying': {
+      const c = copy as unknown as { waiting?: boolean; loading?: boolean; phase?: string };
+      if (c.waiting || c.loading || c.phase === 'loading')
+        return { tone: 'busy', title: 'Still loading the capture…' };
       return { tone: 'busy', title: copy.request === 'full' ? 'Copying full page' : 'Copying' };
+    }
     case 'copied': {
       const size = dims(copy.size);
-      if (copy.outcome === 'full') {
+      const kind = scopeKind(copy);
+      if (kind === 'full') {
         return {
           tone: 'ok',
           title: 'Copied full page',
@@ -44,36 +107,76 @@ export function copyToast(copy: CopyStatus, pageCssH: number | null): ToastConte
           }),
         };
       }
-      if (copy.outcome === 'smart') {
+      // CSS px figures: the engine's (`scope`, after edge snapping) when it reports them, else
+      // derived from the PNG size (copies are always full width, so scale by width).
+      const sc = scopeInfo(copy);
+      const derivedH = page && copy.size.w > 0 ? (copy.size.h * page.w) / copy.size.w : copy.size.h;
+      const cssH = sc?.cssHeight ?? derivedH;
+      const bottom = sc?.cssBottom ?? cssH;
+      const pageTotal = sc?.pageCssHeight ?? pageH;
+      const of =
+        pageTotal != null ? `${nf.format(Math.round(cssH))} of ${px(pageTotal)}` : px(cssH);
+      if (kind === 'fromHere') {
         return {
           tone: 'ok',
-          title: 'Copied the area around your marks',
+          title: 'Copied from here down',
           size,
-          note: copy.tall
-            ? `Your marks span a tall area, so AI chats will scale it down. ${all}.`
-            : `${tall} ${all}.`,
+          note: `${of}. Mark something to copy around it.`,
+        };
+      }
+      if (copy.tall) {
+        return {
+          tone: 'ok',
+          title: 'Copied around your marks',
+          size,
+          note: `Your marks span a tall area, so AI chats will scale it down. ${fullKey} copies the whole page.`,
+        };
+      }
+      if (kind === 'fromTop') {
+        return {
+          tone: 'ok',
+          title: 'Copied the top of the page',
+          size,
+          note: `From the top of the page down to ${px(bottom)}. ${fullKey} copies all ${pageTotal != null ? px(pageTotal) : 'of it'}.`,
         };
       }
       return {
         tone: 'ok',
-        title: 'Copied the current view',
+        title: 'Copied around your marks',
         size,
-        note: `${tall} Mark something to copy around it, or ${combo('mod+shift+c')} for all of it.`,
+        note: `${of}. ${fullKey} copies the whole page.`,
       };
     }
-    case 'failed':
-      if (copy.reason === 'not-focused') {
+    case 'failed': {
+      const reason = copy.reason as string;
+      if (reason === 'not-focused') {
         return {
           tone: 'warn',
           title: `Click the page, then ${combo('mod+c')} again`,
           note: 'Chrome only lets the focused tab use the clipboard.',
         };
       }
+      if (reason === 'loading' || LOADING_RE.test(copy.message)) {
+        return {
+          tone: 'info',
+          title: 'Still loading the capture…',
+          note: `Press ${combo('mod+c')} again in a moment.`,
+        };
+      }
+      if (reason === 'timeout' || TIMEOUT_RE.test(copy.message)) {
+        return {
+          tone: 'warn',
+          title: 'Copying took too long',
+          note: `Try again, or download the image with ${combo('mod+s')}.`,
+        };
+      }
+      const why = humanMessage(copy.message);
       return {
         tone: 'warn',
         title: 'Couldn’t copy the image',
-        note: `${copy.message ? `${copy.message} ` : ''}Download it instead with ${combo('mod+s')}.`,
+        note: `${why ? `${why} ` : ''}Download it instead with ${combo('mod+s')}.`,
       };
+    }
   }
 }
 
@@ -85,25 +188,31 @@ export function downloadToast(download: DownloadStatus): ToastContent | null {
       return { tone: 'busy', title: 'Saving PNG' };
     case 'saved':
       return { tone: 'ok', title: `Saved ${download.filename}`, size: dims(download.size) };
-    case 'failed':
+    case 'failed': {
+      const reason = (download as { reason?: string }).reason;
+      if (reason === 'timeout' || TIMEOUT_RE.test(download.message)) {
+        return {
+          tone: 'warn',
+          title: 'Saving took too long',
+          note: 'The image may be very large. Try again in a moment.',
+        };
+      }
+      const why = humanMessage(download.message);
       return {
         tone: 'warn',
         title: 'Couldn’t save the image',
-        ...(download.message ? { note: download.message } : {}),
+        note: why || 'Something went wrong while making the PNG. Try again in a moment.',
       };
+    }
   }
 }
 
 // ---------------------------------------------------------------- capture notices
 
 export interface NoticeContent {
-  /**
-   * `warn`: the image may be missing or misplacing something (partial, visible-only, cut off,
-   * page changed). `info`: nothing is wrong, the capture just worked differently (a scrolling
-   * panel expanded in place). Info notices are quieter and shown once per profile.
-   */
-  tone: 'warn' | 'info';
-  /** Which warning (or `PARTIAL`) this is; the key for "seen" bookkeeping. */
+  /** The image may be missing or misplacing something (partial, visible-only, cut off, page changed). */
+  tone: 'warn';
+  /** Which warning (or `PARTIAL`) this is. */
   code: CaptureWarningCode | 'PARTIAL' | 'VISIBLE';
   /** Short bold lead-in, when the text alone doesn't say what kind of notice it is. */
   lead?: string;
@@ -113,36 +222,32 @@ export interface NoticeContent {
   all: string[];
 }
 
-/** Warnings in the order they matter to the user. INNER_SCROLLER is informational only. */
+/**
+ * Warnings in the order they matter to the user. `INNER_SCROLLER` is not here: a scrolling panel
+ * expanded in place is how the capture works on Canvas-style pages, not a problem, so it lives in
+ * the page title's tooltip (`innerScrollerNote`) instead of a strip over the first capture.
+ */
 const WARNING_ORDER: CaptureWarningCode[] = [
   'VISIBLE_ONLY',
   'TRUNCATED',
+  'NOT_SCROLLABLE',
   'HEIGHT_CHANGED',
   'IMAGES_PENDING',
-  'INNER_SCROLLER',
 ];
-const INFO_CODES: ReadonlySet<CaptureWarningCode> = new Set(['INNER_SCROLLER']);
 
 /** Fallback sentences, only for records without a message. */
-const FALLBACK: Record<CaptureWarningCode, string> = {
+const FALLBACK: Partial<Record<CaptureWarningCode, string>> = {
   VISIBLE_ONLY: 'Only the visible area was captured.',
   TRUNCATED: 'The page is very long, so the capture stops at the length limit.',
   HEIGHT_CHANGED: 'The page changed while it was captured, so a few parts may be misaligned.',
   IMAGES_PENDING: 'Some images were still loading when they were captured.',
-  INNER_SCROLLER: 'The page scrolls inside a panel, so that panel was expanded in place.',
+  NOT_SCROLLABLE: 'The page wouldn’t scroll, so one screen was captured.',
 };
 
 type NoticeSession = Pick<CaptureSession, 'status' | 'error' | 'warnings' | 'css' | 'mode'>;
 
-/**
- * The notice worth showing for a session, or `null`. A partial capture beats every warning;
- * warnings follow `WARNING_ORDER`. `seenInfo` lists info codes the user has already been told
- * about: those are left out, so an informational line appears once, not on every capture.
- */
-export function captureNotice(
-  session: NoticeSession | null,
-  seenInfo: ReadonlySet<string> = new Set(),
-): NoticeContent | null {
+/** The notice worth showing for a session, or `null`. A partial capture beats every warning. */
+export function captureNotice(session: NoticeSession | null): NoticeContent | null {
   if (!session) return null;
   const items: Omit<NoticeContent, 'all'>[] = [];
   if (session.status === 'partial') {
@@ -157,15 +262,10 @@ export function captureNotice(
   for (const code of WARNING_ORDER) {
     const w = session.warnings.find((x) => x.code === code);
     if (!w) continue;
-    if (INFO_CODES.has(code) && seenInfo.has(code)) continue;
-    items.push({
-      tone: INFO_CODES.has(code) ? 'info' : 'warn',
-      code,
-      text: w.message?.trim() || FALLBACK[code],
-    });
+    items.push({ tone: 'warn', code, text: w.message?.trim() || FALLBACK[code] || '' });
   }
   if (session.mode === 'visible' && !items.some((i) => i.code === 'VISIBLE_ONLY')) {
-    items.push({ tone: 'warn', code: 'VISIBLE', text: FALLBACK.VISIBLE_ONLY });
+    items.push({ tone: 'warn', code: 'VISIBLE', text: FALLBACK.VISIBLE_ONLY ?? '' });
   }
   const first = items[0];
   if (!first) return null;
@@ -175,6 +275,13 @@ export function captureNotice(
   };
 }
 
+/** Line for the page title's tooltip when a scrolling panel was captured as the page. */
+export function innerScrollerNote(session: Pick<CaptureSession, 'warnings'> | null | undefined) {
+  return session?.warnings.some((w) => w.code === 'INNER_SCROLLER')
+    ? 'Captured the scrolling panel as one page.'
+    : null;
+}
+
 // ---------------------------------------------------------------- errors
 
 export interface ErrorContent {
@@ -182,6 +289,8 @@ export interface ErrorContent {
   body: string;
   /** Technical code, shown small for bug reports. */
   code: string;
+  /** How to try again: capture the page again, or reload this tab (the capture itself is fine). */
+  retry: 'capture' | 'reload';
 }
 
 export function errorContent(input: {
@@ -195,13 +304,15 @@ export function errorContent(input: {
       title: 'This capture isn’t here anymore',
       body: 'Captures stay on this device for a while and are then cleared. This one is gone, or it never finished.',
       code,
+      retry: 'capture',
     };
   }
   if (code === 'LOAD_FAILED') {
     return {
       title: 'This capture couldn’t be opened',
-      body: message || 'Something went wrong reading it from storage.',
+      body: humanMessage(message) || 'Something went wrong reading it from storage.',
       code,
+      retry: 'reload',
     };
   }
   switch (captureCode) {
@@ -210,36 +321,60 @@ export function errorContent(input: {
         title: 'Chrome doesn’t allow capturing this page',
         body: 'Extensions can’t read pages like the Chrome Web Store, chrome:// settings or the built-in PDF viewer.',
         code: captureCode,
+        retry: 'capture',
       };
     case 'TAB_CHANGED':
       return {
         title: 'The capture stopped before it started',
         body: 'The tab was switched, closed or navigated while Page Snap was scrolling it. Keep the tab in front until the toolbar badge clears.',
         code: captureCode,
+        retry: 'capture',
       };
     case 'ABORTED_BY_USER':
       return {
         title: 'Capture cancelled',
-        body: 'You pressed Esc before the first screenshot was taken.',
+        body:
+          humanMessage(message) ||
+          'It was stopped, with Esc or a second click on Page Snap, before the first screenshot was taken.',
         code: captureCode,
+        retry: 'capture',
+      };
+    case 'INTERRUPTED':
+      return {
+        title: 'The capture stopped responding',
+        body: 'Chrome stopped Page Snap partway through, before any of the page was saved.',
+        code: captureCode,
+        retry: 'capture',
+      };
+    case 'STORAGE_FAILED':
+      return {
+        title: 'The capture couldn’t be saved',
+        body:
+          humanMessage(message) ||
+          'Chrome couldn’t write it to disk. The disk may be full, or Page Snap’s storage may be.',
+        code: captureCode,
+        retry: 'capture',
       };
     case 'PINCH_ZOOM':
       return {
         title: 'The page is pinch-zoomed',
         body: 'Pinch back out to normal size, then capture again.',
         code: captureCode,
+        retry: 'capture',
       };
     case 'SCROLL_JACKED':
       return {
         title: 'This page wouldn’t scroll',
         body: 'It takes over scrolling, so Page Snap couldn’t step through it.',
         code: captureCode,
+        retry: 'capture',
       };
     default:
       return {
         title: 'The capture didn’t work',
-        body: message || 'Chrome didn’t return any screenshots.',
+        body: humanMessage(message) || 'Chrome didn’t return any screenshots.',
         code: captureCode ?? code,
+        retry: 'capture',
       };
   }
 }

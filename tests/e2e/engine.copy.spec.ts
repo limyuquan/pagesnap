@@ -75,7 +75,7 @@ test('Cmd+C on a tall page copies the smart region; Shift+Cmd+C copies the full 
   expect(countColor(full.png, RED, { x: 100, y: 4950, w: 600, h: 250 }, 10)).toBeGreaterThan(500);
 });
 
-test('Cmd+C on a tall page without annotations copies the current view', async ({ pagesnap }) => {
+test('Cmd+C on a tall page without annotations copies from here down', async ({ pagesnap }) => {
   const id = await pagesnap.seedSession({ cssW: 1280, cssH: 8000 });
   const ed = await pagesnap.openEditor(id);
   await waitReady(ed);
@@ -85,9 +85,48 @@ test('Cmd+C on a tall page without annotations copies the current view', async (
   );
   const { s, png } = await copyAndRead(ed, 'ControlOrMeta+c');
   expect(s.copy.outcome).toBe('viewport');
-  const view = s.viewport.h / s.camera.zoom / s.dpr; // CSS px visible
+  const scope = (s.copy as unknown as { scope: Record<string, unknown> }).scope;
+  expect(scope).toMatchObject({ kind: 'fromHere', mode: 'fill', pageCssHeight: 8000 });
   expect(png.width).toBe(1280);
-  expect(Math.abs(png.height - view)).toBeLessThanOrEqual(2);
-  // Band at CSS y 3000 + 100 → band 6 (#f032e6).
-  expect(near(pixel(png, 640, 100), hexToRgb('#f032e6'), 3)).toBe(true);
+  // From the top of the view (CSS 3000) down to the budget, give or take a 48-px edge snap.
+  expect(scope.cssTop).toBeGreaterThanOrEqual(3000);
+  expect(scope.cssTop as number).toBeLessThanOrEqual(3048);
+  expect(png.height).toBeGreaterThanOrEqual(2576 - 96);
+  expect(png.height).toBeLessThanOrEqual(2576);
+  expect(png.height).toBe(scope.cssHeight);
+  // Band at CSS y (3000 + 100) → band 6 (#f032e6), wherever the top landed.
+  const top = scope.cssTop as number;
+  expect(near(pixel(png, 640, 3100 - top), hexToRgb('#f032e6'), 3)).toBe(true);
+});
+
+test('Cmd+C with marks on a tall page fills the budget from the top, and flashes the region', async ({
+  pagesnap,
+}) => {
+  const id = await pagesnap.seedSession({ cssW: 1280, cssH: 8000 });
+  const ed = await pagesnap.openEditor(id);
+  await waitReady(ed);
+  await dragImage(ed, { x: 300, y: 600 }, { x: 1300, y: 900 });
+  await ed.keyboard.press('ControlOrMeta+c');
+  await expect
+    .poll(async () => (await snapshot(ed)).copy.state, { timeout: 20_000 })
+    .toBe('copied');
+  // The copied rect flashes on the canvas right after the copy.
+  const flash = await ed.evaluate(() =>
+    // biome-ignore lint/suspicious/noExplicitAny: test hook
+    (window as any).__pagesnapEngine.flash(),
+  );
+  const s = await snapshot(ed);
+  const scope = (s.copy as unknown as { scope: Record<string, number | string> }).scope;
+  expect(scope).toMatchObject({ kind: 'fromTop', cssTop: 0, pageCssHeight: 8000 });
+  expect(flash?.region).toEqual(scope.region);
+  expect(flash?.alpha).toBeGreaterThan(0);
+  await expect
+    // biome-ignore lint/suspicious/noExplicitAny: test hook
+    .poll(() => ed.evaluate(() => (window as any).__pagesnapEngine.flash()), { timeout: 3000 })
+    .toBeNull();
+
+  const png = await readClipboardPng(reader);
+  expect(png.height).toBe(scope.cssBottom);
+  expect(scope.cssBottom as number).toBeGreaterThan(2576 - 48);
+  expect(countColor(png, RED, { x: 150, y: 300, w: 520, h: 160 }, 10)).toBeGreaterThan(500);
 });

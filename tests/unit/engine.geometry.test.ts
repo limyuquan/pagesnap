@@ -188,9 +188,9 @@ describe('squareFrom', () => {
 // ------------------------------------------------------------------------------- arrow
 
 describe('arrowHeadLength', () => {
-  it('is four stroke widths when that beats the minimum', () => {
-    expect(arrowHeadLength(12, 1000, 1)).toBe(48);
-    expect(arrowHeadLength(12, 1000, 2)).toBe(48);
+  it('is 4.5 stroke widths when that beats the minimum (design §3)', () => {
+    expect(arrowHeadLength(12, 1000, 1)).toBe(54);
+    expect(arrowHeadLength(12, 1000, 2)).toBe(54);
   });
 
   it('is at least 18 CSS px × dpr', () => {
@@ -211,12 +211,12 @@ describe('arrowGeometry', () => {
 
   it('puts the tip at b and the base 1 head length back, with the head half-angle', () => {
     const g = arrowGeometry(s, 2);
-    expect(g.headLen).toBe(48);
+    expect(g.headLen).toBe(54);
     const [tip, left, right] = g.head;
     expect(tip).toEqual({ x: 300, y: 100 });
-    const half = Math.tan(ARROW_HEAD_HALF_ANGLE) * 48;
-    expect(left.x).toBeCloseTo(252, 9);
-    expect(right.x).toBeCloseTo(252, 9);
+    const half = Math.tan(ARROW_HEAD_HALF_ANGLE) * 54;
+    expect(left.x).toBeCloseTo(246, 9);
+    expect(right.x).toBeCloseTo(246, 9);
     expect(Math.abs(left.y - 100)).toBeCloseTo(half, 9);
     expect(Math.abs(right.y - 100)).toBeCloseTo(half, 9);
     expect(Math.sign(left.y - 100)).toBe(-Math.sign(right.y - 100));
@@ -224,7 +224,7 @@ describe('arrowGeometry', () => {
 
   it('shortens the shaft by 0.8 head lengths', () => {
     const g = arrowGeometry(s, 2);
-    expect(g.shaftEnd.x).toBeCloseTo(300 - 0.8 * 48, 9);
+    expect(g.shaftEnd.x).toBeCloseTo(300 - 0.8 * 54, 9);
     expect(g.shaftEnd.y).toBeCloseTo(100, 9);
   });
 
@@ -254,7 +254,7 @@ describe('shapeBounds', () => {
 
   it('arrow: endpoints and head corners, inflated by half the stroke + 1', () => {
     const s = arrow({ x: 100, y: 100 }, { x: 300, y: 100 });
-    const half = Math.tan(ARROW_HEAD_HALF_ANGLE) * 48;
+    const half = Math.tan(ARROW_HEAD_HALF_ANGLE) * 54;
     expectRectClose(shapeBounds(s, 2), {
       x: 100 - 7,
       y: 100 - half - 7,

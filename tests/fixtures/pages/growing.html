@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Growing page</title>
+<style>
+  body { margin: 0; font: 16px/24px system-ui, sans-serif; }
+  .band { height: 298px; border-top: 2px solid #000; position: relative; }
+  .band span { position: absolute; left: 420px; top: 120px; font: 600 28px/32px system-ui; color: #000; }
+  /* Code blocks: 4 lines collapsed, 16 once they have been on screen for a moment (Sandpack). */
+  pre.code { margin: 0; background: #d9d9d9; padding: 8px 0 8px 300px; font: 14px/24px monospace; color: #222; }
+  pre.code .more { display: none; }
+  pre.code.open .more { display: inline; }
+  /* A placeholder that collapses once mounted (a lazy widget that ends up smaller). */
+  .placeholder { height: 500px; background: #eeeeee; }
+  .placeholder.mounted { height: 200px; }
+  #sentinel { height: 40px; background: #eeeeee; }
+  /* An ad slot that loads a taller creative once it has been scrolled past (Guardian). */
+  .ad { height: 90px; background: #cfcfcf; }
+  .ad.loaded { height: 250px; }
+</style>
+</head>
+<body>
+<main id="main"></main>
+<div id="sentinel"></div>
+<script>
+  // Deterministic, distinct band colours (no two bands share one, so duplicates are detectable).
+  const PALETTE = [
+    '#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c',
+    '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000',
+    '#ffd8b1', '#000075', '#ff4500', '#2e8b57', '#1e90ff', '#ff1493', '#7fff00', '#daa520',
+    '#4b0082', '#00ced1', '#dc143c', '#00fa9a', '#b8860b', '#ff69b4', '#6a5acd', '#20b2aa',
+  ];
+  const main = document.getElementById('main');
+  let n = 0;
+  function band() {
+    const el = document.createElement('div');
+    el.className = 'band';
+    el.dataset.band = String(n);
+    el.style.background = PALETTE[n];
+    el.innerHTML = `<span>Band ${n}</span>`;
+    n++;
+    return el;
+  }
+  function code(id) {
+    const el = document.createElement('pre');
+    el.className = 'code';
+    const lines = [];
+    for (let i = 1; i <= 16; i++) {
+      const text = `const step${id}_${i} = useState(${i}); // line ${i}\n`;
+      lines.push(i <= 4 ? text : `<span class="more">${text}</span>`);
+    }
+    el.innerHTML = lines.join('');
+    return el;
+  }
+  for (let i = 0; i < 22; i++) {
+    main.append(band());
+    if (i % 4 === 2) {
+      const c = code(i);
+      // Alternate: open well before the slice is shot, or right around the shot.
+      c.dataset.dwell = String(i % 8 === 2 ? 200 : 460);
+      main.append(c);
+    }
+    if (i === 8 || i === 16) {
+      const p = document.createElement('div');
+      p.className = 'placeholder';
+      p.dataset.dwell = i === 8 ? '200' : '480';
+      main.append(p);
+    }
+    if (i === 4 || i === 11 || i === 18) {
+      const ad = document.createElement('div');
+      ad.className = 'ad';
+      main.append(ad);
+    }
+  }
+
+  // Things change only after being on screen for a while, like lazily mounted widgets: a quick
+  // pass (Page Snap's pre-scroll) doesn't trigger them, a slice that dwells does.
+  function onDwell(el, ms, fn) {
+    let timer = 0;
+    new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        clearTimeout(timer);
+        if (e.isIntersecting) timer = setTimeout(fn, ms);
+      }
+    }).observe(el);
+  }
+  for (const el of document.querySelectorAll('pre.code')) {
+    onDwell(el, Number(el.dataset.dwell), () => el.classList.add('open'));
+  }
+  for (const el of document.querySelectorAll('.placeholder')) {
+    onDwell(el, Number(el.dataset.dwell), () => el.classList.add('mounted'));
+  }
+  // Ads grow once they have left the viewport upwards, i.e. after their slice was shot.
+  for (const el of document.querySelectorAll('.ad')) {
+    let seen = false;
+    let since = 0;
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        // "Seen" needs a real look (100 ms on screen), not a pre-scroll flyby.
+        if (e.isIntersecting) since = performance.now();
+        else if (since && performance.now() - since >= 100) seen = true;
+        if (!e.isIntersecting && seen && e.boundingClientRect.bottom <= 0) {
+          setTimeout(() => el.classList.add('loaded'), 30);
+          io.disconnect();
+        }
+      }
+    });
+    io.observe(el);
+  }
+
+  // "Infinite-ish" footer: once the end has been on screen for 300 ms, two more bands load,
+  // three times.
+  let loads = 0;
+  const sentinel = document.getElementById('sentinel');
+  let since = 0;
+  const poll = setInterval(() => {
+    const r = sentinel.getBoundingClientRect();
+    const visible = r.top < innerHeight && r.bottom > 0;
+    if (!visible) since = 0;
+    else if (!since) since = performance.now();
+    else if (performance.now() - since >= 300) {
+      loads++;
+      main.append(band(), band());
+      since = 0;
+      if (loads >= 3) clearInterval(poll);
+    }
+  }, 50);
+
+  window.__fixture = {
+    name: 'growing',
+    bandHeight: 300,
+    ruleHeight: 2,
+    codeColor: '#d9d9d9',
+    adColor: '#cfcfcf',
+    placeholderColor: '#eeeeee',
+    sampleX: 20,
+    initialBands: 22,
+    maxBands: 28,
+    /** Colours of the bands in page order, now (the footer appends more). */
+    bands: () => [...document.querySelectorAll('.band')].map((b) => PALETTE[Number(b.dataset.band)]),
+    loads: () => loads,
+  };
+</script>
+</body>
+</html>

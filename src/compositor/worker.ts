@@ -1,6 +1,6 @@
 /**
- * Compositor worker (owner: A): renders display tiles off the main thread with OffscreenCanvas
- * and transfers them back as ImageBitmaps. Reads slices straight from IndexedDB.
+ * Compositor worker: renders display tiles (any level of detail) off the main thread with
+ * OffscreenCanvas and transfers them back as ImageBitmaps. Reads slices straight from IndexedDB.
  */
 import { getSliceBlob } from '@/shared/db';
 import type { FromWorker, ToWorker } from './messages';
@@ -13,6 +13,7 @@ const scope = self as unknown as {
   close(): void;
 };
 let renderer: TileRenderer | null = null;
+const cancelled = new Set<number>();
 
 scope.onmessage = (e: MessageEvent<ToWorker>) => {
   const msg = e.data;
@@ -25,11 +26,27 @@ scope.onmessage = (e: MessageEvent<ToWorker>) => {
     case 'tile': {
       const r = renderer;
       if (!r) return post({ t: 'error', id: msg.id, message: 'not initialised' });
-      r.render(msg.rect).then(
-        (bitmap) => post({ t: 'tile', id: msg.id, bitmap }, [bitmap]),
-        (err: unknown) =>
-          post({ t: 'error', id: msg.id, message: String((err as Error)?.message ?? err) }),
+      const id = msg.id;
+      r.render(msg.rect, msg.scale, {
+        priority: msg.priority,
+        isCancelled: () => cancelled.has(id),
+      }).then(
+        (bitmap) => {
+          if (cancelled.delete(id)) {
+            bitmap.close();
+            post({ t: 'error', id, name: 'AbortError', message: 'Aborted' });
+          } else post({ t: 'tile', id, bitmap }, [bitmap]);
+        },
+        (err: unknown) => {
+          cancelled.delete(id);
+          const e = err as { name?: string; message?: string };
+          post({ t: 'error', id, name: e?.name ?? 'Error', message: String(e?.message ?? err) });
+        },
       );
+      return;
+    }
+    case 'cancel': {
+      cancelled.add(msg.id);
       return;
     }
     case 'dispose': {
@@ -39,6 +56,8 @@ scope.onmessage = (e: MessageEvent<ToWorker>) => {
     }
   }
 };
+
+post({ t: 'ready' });
 
 function post(msg: FromWorker, transfer: Transferable[] = []): void {
   scope.postMessage(msg, transfer);

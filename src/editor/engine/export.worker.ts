@@ -3,8 +3,8 @@
  * (`new Worker(new URL('./export.worker.ts', import.meta.url), { type: 'module' })`).
  *
  * In:  `{ t: 'job', id, job, priority? }`, `{ t: 'cancel', id }`, `{ t: 'priority', id, priority }`.
- * Out: `{ t: 'done', id, result }` or `{ t: 'error', id, name, message }` (`AbortError` when
- * cancelled). Jobs run serially; see `exportRunner.ts`. Sessions and slices come from IndexedDB.
+ * Out: `{ t: 'ready' }` once loaded, then `{ t: 'done', id, result }` or
+ * `{ t: 'error', id, name, message }` (`AbortError` when cancelled). Jobs run serially; see `exportRunner.ts`. Sessions and slices come from IndexedDB.
  */
 import { createExportRunner, type ExportRequest, type ExportResponse } from './exportRunner';
 
@@ -17,3 +17,6 @@ interface WorkerScope {
 const scope = self as unknown as WorkerScope;
 const handle = createExportRunner((msg) => scope.postMessage(msg));
 scope.onmessage = (ev) => handle(ev.data);
+// Tells the exporter the script loaded: an error before this is a startup failure (main-thread
+// fallback), an error after it is a crash (reject the pending jobs, start a fresh worker).
+scope.postMessage({ t: 'ready' });

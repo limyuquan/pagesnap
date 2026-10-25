@@ -1,7 +1,8 @@
 /**
- * Minimal accessible menu button (zoom, stroke size). Opens below its button, focuses the checked
- * item, arrows move, Enter/Space pick, Esc or Tab or a click outside closes. Keys it handles don't
- * reach the editor's global shortcuts (so Esc closes the menu instead of switching tools).
+ * Minimal accessible menu button (zoom, stroke size, colour). Opens below its button, focuses the
+ * checked item, arrows move (left/right too for a horizontal menu), Enter/Space pick, Esc or Tab
+ * or a click outside closes. Keys it handles don't reach the editor's global shortcuts (so Esc
+ * closes the menu instead of switching tools, and arrows don't scroll the capture).
  */
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { ChevronIcon } from './icons';
@@ -14,6 +15,9 @@ interface MenuButtonProps {
   className?: string;
   align?: 'start' | 'center' | 'end';
   testId?: string;
+  /** Lay the items out in a row (colour); left/right arrows move between them. */
+  orientation?: 'vertical' | 'horizontal';
+  popClassName?: string;
   button: ReactNode;
   children: (close: () => void) => ReactNode;
 }
@@ -28,6 +32,8 @@ export function MenuButton({
   className = 'ps-tbtn',
   align = 'center',
   testId,
+  orientation = 'vertical',
+  popClassName,
   button,
   children,
 }: MenuButtonProps) {
@@ -61,12 +67,23 @@ export function MenuButton({
     const items = [...pop.querySelectorAll<HTMLElement>(ITEM)];
     const i = items.indexOf(document.activeElement as HTMLElement);
     let next: HTMLElement | undefined;
+    const horizontal = orientation === 'horizontal';
+    const fwd = horizontal ? 'ArrowRight' : 'ArrowDown';
+    const back = horizontal ? 'ArrowLeft' : 'ArrowUp';
     switch (e.key) {
-      case 'ArrowDown':
+      case fwd:
         next = items[(i + 1) % items.length];
         break;
-      case 'ArrowUp':
+      case back:
         next = items[(i - 1 + items.length) % items.length];
+        break;
+      case 'ArrowDown':
+      case 'ArrowUp':
+      case 'ArrowLeft':
+      case 'ArrowRight':
+      case 'PageUp':
+      case 'PageDown':
+        // The other axis: swallow, so the capture doesn't scroll behind an open menu.
         break;
       case 'Home':
         next = items[0];
@@ -129,7 +146,8 @@ export function MenuButton({
           id={id}
           role="menu"
           aria-label={label}
-          className="ps-pop"
+          aria-orientation={orientation}
+          className={popClassName ? `ps-pop ${popClassName}` : 'ps-pop'}
           style={popStyle}
           onKeyDown={onKeyDown}
         >

@@ -13,7 +13,17 @@ import type { CaptureSession, SessionId } from '@/shared/types';
 
 export type SessionMeta = Pick<
   CaptureSession,
-  'id' | 'title' | 'url' | 'status' | 'error' | 'warnings' | 'css' | 'mode' | 'progress'
+  | 'id'
+  | 'title'
+  | 'url'
+  | 'status'
+  | 'error'
+  | 'warnings'
+  | 'css'
+  | 'mode'
+  | 'progress'
+  /** Last write of the status mirror; the capture's heartbeat while it runs (CONTRACTS §8, F1). */
+  | 'updatedAt'
 >;
 
 /** `undefined` while unknown, `null` if there's no such session. */
@@ -38,9 +48,19 @@ export function useSessionMeta(sessionId: SessionId | null): SessionMeta | null 
       }
       if (snap.status !== lastStatus) {
         lastStatus = snap.status;
-        void refresh();
+        void refresh().then(() =>
+          // The IDB record can lag the mirror; keep the newest heartbeat.
+          setLocal((prev) =>
+            prev && alive && prev.updatedAt < snap.updatedAt
+              ? { ...prev, updatedAt: snap.updatedAt }
+              : prev,
+          ),
+        );
       } else {
-        setLocal((prev) => (prev ? { ...prev, progress: snap.progress } : prev));
+        // Progress or the running capture's heartbeat.
+        setLocal((prev) =>
+          prev ? { ...prev, progress: snap.progress, updatedAt: snap.updatedAt } : prev,
+        );
       }
     });
     return () => {

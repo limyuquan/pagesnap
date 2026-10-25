@@ -3,7 +3,9 @@
  * Map (03 §8, v0.1 subset): V/Esc select, A/R/U/H/P/T tools, 1–8 colours, [ ] size,
  * ⌘Z / ⇧⌘Z / ⌘Y undo/redo, ⌫/Del delete, ⌘A select all, ⌘C copy (default), ⇧⌘C copy full,
  * ⌘S download, ⌘0 / ⌘1 / ⌘= / ⌘- zoom. Single keys are ignored while typing or composing.
- * (Space-drag panning lives in the canvas controller.)
+ * Keyboard scrolling (qa-edge E7): with nothing selected ↑↓←→ scroll, PageUp/PageDown page,
+ * Home/End jump to the top/bottom; with a selection the arrows nudge it 1 CSS px (⇧ 10).
+ * (Space-drag panning and Space/⇧Space paging live in the canvas controller.)
  */
 import { useEffect } from 'react';
 import { TOOL_SHORTCUTS, type Tool, useEditorStore } from './store';
@@ -23,6 +25,78 @@ export function isTypingTarget(t: EventTarget | null): boolean {
     return !['button', 'checkbox', 'radio', 'range', 'color', 'submit', 'reset'].includes(type);
   }
   return false;
+}
+
+/**
+ * Controls that own their own keys (Space/Enter activate, arrows move between radios or menu
+ * items): the editor's navigation keys leave them alone.
+ */
+export function isInteractiveTarget(t: EventTarget | null): boolean {
+  if (!(t instanceof HTMLElement)) return false;
+  if (isTypingTarget(t)) return true;
+  const tag = t.tagName;
+  if (tag === 'BUTTON' || tag === 'A' || tag === 'INPUT' || tag === 'SUMMARY') return true;
+  const role = t.getAttribute('role');
+  return (
+    !!role &&
+    /^(button|link|menuitem|menuitemradio|menuitemcheckbox|radio|option|tab|checkbox|switch|slider|spinbutton|combobox|listbox|menu|menubar|radiogroup|tablist|toolbar)$/.test(
+      role,
+    )
+  );
+}
+
+/** Arrow-key scroll step, CSS px of the screen. */
+export const ARROW_SCROLL_CSS = 48;
+
+/** Scroll the view by screen CSS px. */
+export function scrollByCss(dx: number, dy: number): void {
+  const s = useEditorStore.getState();
+  const z = s.camera.zoom;
+  s.actions.setCamera({ x: s.camera.x + dx / z, y: s.camera.y + dy / z });
+}
+
+/** PageDown (+1) / PageUp (-1): 90% of the view. */
+export function pageBy(dir: 1 | -1): void {
+  const s = useEditorStore.getState();
+  scrollByCss(0, dir * Math.max(1, s.viewport.h * 0.9));
+}
+
+function navigationKey(e: KeyboardEvent, key: string): boolean {
+  const s = useEditorStore.getState();
+  if (!s.session || s.load.phase !== 'ready') return false;
+  const arrows: Record<string, [number, number]> = {
+    ArrowUp: [0, -1],
+    ArrowDown: [0, 1],
+    ArrowLeft: [-1, 0],
+    ArrowRight: [1, 0],
+  };
+  const arrow = arrows[key];
+  if (arrow) {
+    if (s.selection.length > 0) {
+      const step = (e.shiftKey ? 10 : 1) * s.session.dpr;
+      s._engine._nudge(arrow[0] * step, arrow[1] * step);
+    } else {
+      const step = ARROW_SCROLL_CSS * (e.shiftKey ? 5 : 1);
+      scrollByCss(arrow[0] * step, arrow[1] * step);
+    }
+    return true;
+  }
+  switch (key) {
+    case 'PageDown':
+      pageBy(1);
+      return true;
+    case 'PageUp':
+      pageBy(-1);
+      return true;
+    case 'Home':
+      s.actions.setCamera({ y: Number.NEGATIVE_INFINITY });
+      return true;
+    case 'End':
+      s.actions.setCamera({ y: Number.POSITIVE_INFINITY });
+      return true;
+    default:
+      return false;
+  }
 }
 
 /** Handle one keydown. Returns true when it was an editor shortcut (and was prevented). */
@@ -79,6 +153,8 @@ export function handleEditorKey(e: KeyboardEvent): boolean {
     }
   }
   if (mod || e.altKey) return false;
+
+  if (!isInteractiveTarget(e.target) && navigationKey(e, key)) return prevent();
 
   switch (key) {
     case 'Escape':

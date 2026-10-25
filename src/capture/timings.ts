@@ -21,6 +21,8 @@ export interface CaptureTimings {
   totalMs: number;
   /** Gaps between consecutive captureVisibleTab calls, ms. */
   frameGapsMs: number[];
+  /** Slices taken again because the page moved while they were shot. */
+  retakes?: number;
 }
 
 const key = (id: SessionId) => `capture-timings:${id}`;

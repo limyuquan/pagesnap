@@ -2,32 +2,45 @@ import { browser } from 'wxt/browser';
 import { defineBackground } from 'wxt/utils/define-background';
 import { installAgentListener } from '@/capture/agentLink';
 import {
+  activeCaptureId,
+  activeCaptureTabId,
   cancelCapture,
   captureJustStarted,
+  queueCapture,
   recoverAllInterrupted,
   recoverInterrupted,
+  recoverSession,
   startCapture,
 } from '@/capture/orchestrator';
+import { runRetention } from '@/capture/retention';
 import { captureTestHook } from '@/capture/testHook';
-import { pruneSessions } from '@/shared/db';
-import { getSettings } from '@/shared/settings';
+import type { RecoverRequest } from '@/shared/protocol';
 import { seedSyntheticSession } from '@/shared/testing/synthetic';
 import type { SessionId } from '@/shared/types';
 
 const MENU_CAPTURE = 'capture-full-page';
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * User trigger: start a capture, or cancel the running one. A second click within the first
- * moments is treated as a double-click and ignored.
+ * User trigger, per tab:
+ * - no capture running: start one;
+ * - a capture of this tab is running: a second click within its first moments is a double-click
+ *   (ignored), later it cancels;
+ * - a capture of another tab (or window) is running: queue this one to start when it ends (a tab
+ *   switch in the same window stops the running one anyway).
  */
 function trigger(tab: Parameters<typeof startCapture>[0]): Promise<SessionId | null> {
-  if (captureJustStarted()) return Promise.resolve(null);
-  if (cancelCapture()) return Promise.resolve(null);
-  return startCapture(tab).catch((err: unknown) => {
+  const runningTab = activeCaptureTabId();
+  const failed = (err: unknown) => {
     console.error('[pagesnap] capture failed', err);
     return null;
-  });
+  };
+  if (runningTab != null && runningTab === tab.id) {
+    if (captureJustStarted(800, tab.id)) return Promise.resolve(null);
+    cancelCapture();
+    return Promise.resolve(null);
+  }
+  if (runningTab != null) return queueCapture(tab).catch(failed);
+  return startCapture(tab).catch(failed);
 }
 
 /**
@@ -40,7 +53,22 @@ function onActionClicked(tab: Parameters<typeof startCapture>[0]): Promise<Sessi
 
 export default defineBackground(() => {
   installAgentListener();
-  void recoverInterrupted().catch(() => {});
+  void (async () => {
+    await recoverInterrupted();
+    await runRetention({ activeId: activeCaptureId(), reason: 'startup' });
+  })().catch((err: unknown) => console.warn('[pagesnap] start-up recovery failed', err));
+
+  // An editor waiting on a capture whose heartbeat stopped. The message itself wakes a
+  // terminated SW (which then recovers above); a live SW recovers that session now.
+  browser.runtime.onMessage.addListener((msg: unknown, sender) => {
+    const req = msg as Partial<RecoverRequest> | null;
+    if (req?.t !== 'pagesnap/recover' || typeof req.id !== 'string') return;
+    if (sender.id !== browser.runtime.id) return;
+    return recoverSession(req.id).then(
+      () => true,
+      () => false,
+    );
+  });
 
   // Toolbar click and the `_execute_action` shortcut (Alt+Shift+P) both land here (no popup).
   browser.action.onClicked.addListener((tab) => void onActionClicked(tab));
@@ -61,8 +89,7 @@ export default defineBackground(() => {
   browser.runtime.onStartup.addListener(() => {
     void (async () => {
       await recoverAllInterrupted();
-      const { storage } = await getSettings();
-      await pruneSessions({ keep: storage.keepSessions, maxAgeMs: storage.maxAgeDays * DAY_MS });
+      await runRetention({ activeId: activeCaptureId(), reason: 'browser-start', force: true });
     })().catch((err: unknown) => console.warn('[pagesnap] startup cleanup failed', err));
   });
 

@@ -89,3 +89,33 @@ test('the canvas renders crisp 1:1 tiles at DPR 2 and 100%', async ({ pagesnap }
   expect(rows.out.slice(0, 4)).toEqual(Array(4).fill([0xe6, 0x19, 0x4b]));
   expect(rows.out.slice(4)).toEqual(Array(4).fill([0x3c, 0xb4, 0x4b]));
 });
+
+test('scrolling at fit width keeps fit-width mode; zooming leaves it; tool cursors differ', async ({
+  pagesnap,
+}) => {
+  const id = await pagesnap.seedSession({ cssW: 1280, cssH: 6000 });
+  const ed = await pagesnap.openEditor(id);
+  await waitReady(ed);
+  // biome-ignore lint/suspicious/noExplicitAny: test hook
+  const isFit = () => ed.evaluate(() => (window as any).__pagesnapEngine.state()._fit as boolean);
+  expect(await isFit()).toBe(true);
+  const c = await ed.getByTestId('editor-canvas').boundingBox();
+  if (!c) throw new Error('no canvas');
+  await ed.mouse.move(c.x + c.width / 2, c.y + c.height / 2);
+  await ed.mouse.wheel(0, 400);
+  await expect.poll(async () => (await snapshot(ed)).camera.y).toBeGreaterThan(0);
+  expect(await isFit()).toBe(true);
+  await ed.keyboard.press('ControlOrMeta+-');
+  expect(await isFit()).toBe(false);
+
+  const cursor = () => ed.getByTestId('editor-canvas').evaluate((el) => el.style.cursor);
+  await ed.keyboard.press('a');
+  expect(await cursor()).toBe('crosshair');
+  await ed.keyboard.press('p');
+  const pen = await cursor();
+  await ed.keyboard.press('h');
+  const hl = await cursor();
+  expect(pen).toMatch(/^url\(.+\) 8 8, crosshair$/);
+  expect(hl).toMatch(/^url\(.+\) 8 8, crosshair$/);
+  expect(pen).not.toBe(hl);
+});

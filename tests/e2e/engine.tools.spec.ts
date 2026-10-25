@@ -67,7 +67,7 @@ test('draws every tool with the mouse and exports the pixels', async ({ pagesnap
   expect(arrow).toMatchObject({ color: '#FF3B30', width: 12, shadow: true });
   expect(rect).toMatchObject({ width: 10, fill: 'none' });
   expect(underline.a.y).toBe(underline.b.y);
-  expect(highlight).toMatchObject({ color: '#FFD60A', thickness: 44, opacity: 0.45 });
+  expect(highlight).toMatchObject({ color: '#FFCC00', thickness: 44, opacity: 0.6 });
   expect(pen.pts.length).toBeGreaterThan(5);
   expect(text).toMatchObject({ text: 'Hi there', size: 52, weight: 700, style: 'outline' });
   expect(s.rev).toBe(6); // one undo step per gesture
@@ -78,10 +78,10 @@ test('draws every tool with the mouse and exports the pixels', async ({ pagesnap
   expect(near(pixel(png, 500, 2200), RED, 8)).toBe(true);
   expect(near(pixel(png, 1000, 2250), RED, 8)).toBe(true);
   expect(near(pixel(png, 500, 2500), RED, 8)).toBe(true);
-  // Highlighter multiplies yellow at 45% over the blue band.
+  // Highlighter multiplies #FFCC00 at 60% over the blue band (design §3).
   const hl = pixel(png, 550, 2650);
   const expected = BLUE_BAND.map(
-    (c, i) => c * (1 - 0.45 + (0.45 * (hexToRgb('#FFD60A')[i] ?? 0)) / 255),
+    (c, i) => c * (1 - 0.6 + (0.6 * (hexToRgb('#FFCC00')[i] ?? 0)) / 255),
   );
   expect(near(hl, expected, 4), `highlight ${hl} vs ${expected}`).toBe(true);
   // Untouched band stays blue.
@@ -221,7 +221,7 @@ test('colour keys 1–8 and [ ] size apply to new shapes and the selection', asy
   await ed.keyboard.press('h');
   await dragImage(ed, { x: 200, y: 2500 }, { x: 800, y: 2500 });
   s = await snapshot(ed);
-  expect(s.shapes[1]).toMatchObject({ color: '#FFD60A' });
+  expect(s.shapes[1]).toMatchObject({ color: '#FFCC00' });
   // Recolour and resize the selected arrow.
   await ed.keyboard.press('v');
   await clickImage(ed, { x: 500, y: 2200 });

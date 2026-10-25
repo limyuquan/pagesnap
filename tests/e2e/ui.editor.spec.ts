@@ -58,37 +58,51 @@ test('tools switch by click and by hotkey', async ({ pagesnap }) => {
   }
 });
 
-test('colour and size controls drive the store', async ({ pagesnap }) => {
+test('colour well and size controls drive the store', async ({ pagesnap }) => {
   const { page } = await openSeeded(pagesnap);
-  const colours = page.getByRole('radiogroup', { name: 'Colour' });
-  await expect(colours.getByRole('radio')).toHaveCount(8);
-  await expect(colours.getByRole('radio', { name: 'Red' })).toHaveAttribute('aria-checked', 'true');
+  const well = page.getByTestId('color-button');
+  await expect(well).toHaveAccessibleName('Colour, Red');
 
-  await colours.getByRole('radio', { name: 'Blue' }).click();
-  await expect(colours.getByRole('radio', { name: 'Blue' })).toHaveAttribute(
+  // The swatches live in a popover row, with their number keys.
+  await well.click();
+  const colours = page.getByRole('menu', { name: /Colour/ });
+  await expect(colours.getByRole('menuitemradio')).toHaveCount(8);
+  await expect(colours.getByRole('menuitemradio', { name: 'Red' })).toHaveAttribute(
     'aria-checked',
     'true',
   );
+  await expect(colours.getByRole('menuitemradio', { name: 'Red' })).toBeFocused();
+  await expect(colours.getByRole('menuitemradio', { name: 'Blue' })).toHaveText('5');
+  await colours.getByRole('menuitemradio', { name: 'Blue' }).click();
+  await expect(colours).toBeHidden();
   expect((await uiState(page)).styles.arrow.color.toUpperCase()).toBe('#0A84FF');
+  await expect(well).toHaveAccessibleName('Colour, Blue');
 
-  // Arrow keys move within the radio group.
-  await colours.getByRole('radio', { name: 'Blue' }).press('ArrowRight');
+  // Keyboard: open, arrows move along the row, Enter picks, focus returns to the well.
+  await well.focus();
+  await page.keyboard.press('Enter');
+  await expect(colours.getByRole('menuitemradio', { name: 'Blue' })).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(colours.getByRole('menuitemradio', { name: 'Purple' })).toBeFocused();
+  await page.keyboard.press('Enter');
   expect((await uiState(page)).styles.arrow.color.toUpperCase()).toBe('#AF52DE');
-  await expect(colours.getByRole('radio', { name: 'Purple' })).toBeFocused();
+  await expect(well).toBeFocused();
 
-  // Number keys (engine shortcut) reflect in the swatches.
+  // Number keys (engine shortcut) reflect in the well, popover closed.
+  await page.locator('body').click({ position: { x: 5, y: 200 } });
   await page.keyboard.press('1');
-  await expect(colours.getByRole('radio', { name: 'Red' })).toHaveAttribute('aria-checked', 'true');
+  await expect(well).toHaveAccessibleName('Colour, Red');
 
-  // Size menu.
+  // Size menu: each step previews the real stroke.
   await page.getByTestId('size-button').click();
-  const menu = page.getByRole('menu');
+  const menu = page.getByRole('menu', { name: /Stroke width/ });
   await expect(menu).toBeVisible();
   await expect(menu.getByRole('menuitemradio', { name: '6 px', exact: true })).toHaveAttribute(
     'aria-checked',
     'true',
   );
   await expect(menu.getByRole('menuitemradio', { name: '6 px', exact: true })).toBeFocused();
+  await expect(menu.locator('[data-size="12"] .ps-size-line')).toHaveCSS('height', '12px');
   await menu.getByRole('menuitemradio', { name: '12 px', exact: true }).click();
   await expect(menu).toBeHidden();
   expect((await uiState(page)).styles.arrow.size).toBe(12);
@@ -113,84 +127,139 @@ test('colour and size controls drive the store', async ({ pagesnap }) => {
 
   // The highlighter keeps its own colour.
   await tool(page, 'Highlighter').click();
-  await expect(colours.getByRole('radio', { name: 'Yellow' })).toHaveAttribute(
+  await expect(well).toHaveAccessibleName(/^Colour, (Yellow|Custom)$/);
+
+  // Select with nothing selected: colour and size are inactive but never blank; they keep
+  // showing the last draw tool's style.
+  await tool(page, 'Rectangle').click();
+  await tool(page, 'Select').click();
+  await expect(well).toBeDisabled();
+  await expect(well).toHaveAccessibleName('Colour, Red');
+  await expect(page.getByTestId('size-button')).toBeDisabled();
+  await expect(page.getByTestId('size-value')).toHaveText('5');
+});
+
+test('the active tool reads as pressed', async ({ pagesnap }) => {
+  const { page } = await openSeeded(pagesnap);
+  const look = (name: string) =>
+    tool(page, name).evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { bg: cs.backgroundColor, shadow: cs.boxShadow };
+    });
+  await page.mouse.move(5, 300);
+  const on = await look('Arrow');
+  const off = await look('Rectangle');
+  expect(on.bg).not.toBe(off.bg);
+  expect(on.shadow).toContain('inset');
+  // 17% white in dark, 11% black in light (design review §1).
+  expect(on.bg).toMatch(/rgba\((255, 255, 255, 0\.17|0, 0, 0, 0\.11)\)/);
+});
+
+test('zoom reads Fit in fit-width mode, a percentage after zooming', async ({ pagesnap }) => {
+  const { page } = await openSeeded(pagesnap);
+  const zoom = page.getByTestId('zoom-value');
+  await expect(zoom).toHaveText('Fit');
+  await page.getByTestId('zoom-button').click();
+  await expect(page.getByRole('menuitemradio', { name: /Fit width/ })).toHaveAttribute(
     'aria-checked',
     'true',
   );
-
-  // Select with nothing selected: colour and size are disabled.
-  await tool(page, 'Select').click();
-  await expect(colours.getByRole('radio', { name: 'Red' })).toBeDisabled();
-  await expect(page.getByTestId('size-button')).toBeDisabled();
+  await page.getByRole('menuitemradio', { name: /Actual size/ }).click();
+  await expect(zoom).toHaveText('100%');
+  await page.getByTestId('zoom-button').click();
+  await expect(page.getByRole('menuitemradio', { name: /Actual size/ })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
+  await page.getByRole('menuitemradio', { name: /Fit width/ }).click();
+  await expect(zoom).toHaveText('Fit');
 });
 
 test('copy toast says what was copied', async ({ pagesnap }) => {
   const { page } = await openSeeded(pagesnap, { cssW: 1280, cssH: 6000 });
   const toast = page.getByTestId('toast');
   const title = page.getByTestId('toast-title');
-
-  await setUiState(page, {
-    copy: {
-      state: 'copied',
-      request: 'full',
-      outcome: 'full',
-      size: { w: 1280, h: 6000 },
-      tall: true,
-      at: Date.now(),
-    },
+  let at = Date.now();
+  const copied = (outcome: string, h: number, scope?: object, tall = false) =>
+    setUiState(page, {
+      copy: {
+        state: 'copied',
+        request: outcome === 'full' ? 'full' : 'default',
+        outcome,
+        size: { w: 1280, h },
+        tall,
+        at: at++,
+        ...(scope && { scope }),
+      } as never,
+    });
+  const scope = (kind: string, cssTop: number, cssBottom: number) => ({
+    kind,
+    mode: 'fill',
+    region: { x: 0, y: cssTop, w: 1280, h: cssBottom - cssTop },
+    cssTop,
+    cssBottom,
+    cssHeight: cssBottom - cssTop,
+    pageCssHeight: 6000,
   });
+
+  await copied('full', 6000, undefined, true);
   await expect(toast).not.toHaveAttribute('data-hidden');
   await expect(title).toHaveText('Copied full page');
   await expect(page.getByTestId('toast-size')).toHaveText('1280 × 6000');
   await expect(toast).toContainText('AI chats will scale it down');
   await expect(page.getByTestId('copy-button')).toHaveAttribute('data-state', 'copied');
 
-  await setUiState(page, {
-    copy: {
-      state: 'copied',
-      request: 'default',
-      outcome: 'smart',
-      size: { w: 1280, h: 1184 },
-      tall: false,
-      at: Date.now() + 1,
-    },
-  });
-  await expect(title).toHaveText('Copied the area around your marks');
-  await expect(toast).toContainText('6,000 px tall');
-  await expect(toast).toContainText(/copies all of it/);
+  await copied('smart', 2576, scope('fromTop', 0, 2576));
+  await expect(title).toHaveText('Copied the top of the page');
+  await expect(toast).toContainText('From the top of the page down to 2,576 px.');
+  await expect(toast).toContainText(/C copies all 6,000 px\./);
+
+  await copied('smart', 2576, scope('aroundMarks', 1400, 3976));
+  await expect(title).toHaveText('Copied around your marks');
+  await expect(toast).toContainText(/2,576 of 6,000 px\. .*C copies the whole page\./);
+
+  await copied('viewport', 2576, scope('fromHere', 2000, 4576));
+  await expect(title).toHaveText('Copied from here down');
+  await expect(toast).toContainText('2,576 of 6,000 px. Mark something to copy around it.');
 
   await setUiState(page, {
-    copy: {
-      state: 'copied',
-      request: 'default',
-      outcome: 'viewport',
-      size: { w: 1280, h: 2576 },
-      tall: false,
-      at: Date.now() + 2,
-    },
+    copy: { state: 'failed', request: 'default', reason: 'not-focused', message: '', at: at++ },
   });
-  await expect(title).toHaveText('Copied the current view');
+  await expect(title).toHaveText(/^Click the page, then .+C again$/);
 
   await setUiState(page, {
     copy: {
       state: 'failed',
       request: 'default',
-      reason: 'not-focused',
-      message: '',
-      at: Date.now() + 3,
-    },
+      reason: 'timeout',
+      message: 'TIMEOUT',
+      at: at++,
+    } as never,
   });
-  await expect(title).toHaveText(/^Click the page, then .+C again$/);
+  await expect(title).toHaveText('Copying took too long');
 
   await setUiState(page, {
-    download: {
-      state: 'saved',
-      filename: 'page-snap.png',
-      size: { w: 2560, h: 12000 },
-      at: Date.now() + 4,
-    },
+    download: { state: 'saved', filename: 'page-snap.png', size: { w: 2560, h: 12000 }, at: at++ },
   });
   await expect(title).toHaveText('Saved page-snap.png');
+
+  await setUiState(page, {
+    download: { state: 'failed', message: 'TIMEOUT', reason: 'timeout', at: at++ } as never,
+  });
+  await expect(title).toHaveText('Saving took too long');
+});
+
+test('⌘C before the capture is on screen says it is still loading', async ({
+  pagesnap,
+  serviceWorker,
+}) => {
+  const id = await pagesnap.seedSession({ cssW: 1280, cssH: 3000 });
+  await patchSession(serviceWorker, id, { status: 'capturing', progress: { done: 2, total: 5 } });
+  const page = await pagesnap.openEditor(id);
+  await expect(page.getByTestId('state-loading')).toBeVisible();
+  await page.locator('body').click({ position: { x: 600, y: 400 } });
+  await page.keyboard.press('ControlOrMeta+c');
+  await expect(page.getByTestId('toast-title')).toHaveText('Still loading the capture…');
 });
 
 test('clicking Copy reports a result in the toast', async ({ pagesnap }) => {
@@ -219,7 +288,13 @@ test('first-open hint goes away on the first mark', async ({ pagesnap }) => {
   const hint = page.getByTestId('empty-hint');
   await expect(hint).toBeVisible();
   await expect(hint).not.toHaveAttribute('data-hidden');
-  await expect(hint).toContainText('Draw on the page');
+  await expect(page.getByTestId('hint-text')).toHaveText('Drag to draw an arrow');
+  await expect(hint).toContainText(/C copies$/);
+  // It follows the tool until the first mark.
+  await page.keyboard.press('r');
+  await expect(page.getByTestId('hint-text')).toHaveText('Drag to draw a rectangle');
+  await page.keyboard.press('a');
+  await expect(page.getByTestId('hint-text')).toHaveText('Drag to draw an arrow');
   await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
 
   const box = await page.getByTestId('editor-canvas').boundingBox();
@@ -335,6 +410,109 @@ test.describe('capture states', () => {
     });
   });
 });
+
+test.describe('stuck states', () => {
+  test.beforeEach(async ({ context }) => {
+    await context.addInitScript(() => {
+      (window as unknown as { __pagesnapUiTiming: object }).__pagesnapUiTiming = {
+        stallMs: 1500,
+        openMs: 1500,
+      };
+    });
+  });
+
+  test('a capture with no sign of life says it stopped responding', async ({
+    pagesnap,
+    serviceWorker,
+  }) => {
+    const id = await pagesnap.seedSession({ cssW: 1280, cssH: 3000 });
+    await patchSession(serviceWorker, id, { status: 'capturing', progress: { done: 3, total: 9 } });
+    const page = await pagesnap.openEditor(id);
+    const loading = page.getByTestId('state-loading');
+    await expect(loading).toContainText('Capturing the page');
+    await expect(loading).toHaveAttribute('data-phase', 'stalled', { timeout: 5000 });
+    await expect(loading).toContainText('The capture stopped responding');
+    await expect(loading).toContainText('Stuck at 3 of 9');
+    await expect(loading).toContainText(/go back to the page and press/);
+  });
+
+  test('opening that never finishes turns into an error with a reload action', async ({
+    context,
+    pagesnap,
+  }) => {
+    const id = await pagesnap.seedSession({ cssW: 1280, cssH: 3000 });
+    // IndexedDB that never answers: the editor can't read the capture or its status.
+    await context.addInitScript(() => {
+      IDBFactory.prototype.open = () =>
+        Object.assign(new EventTarget(), { result: null, error: null }) as never;
+    });
+    const page = await pagesnap.openEditor(id);
+    const err = page.getByTestId('state-error');
+    await expect(err).toBeVisible({ timeout: 8000 });
+    await expect(err).toHaveAttribute('data-code', 'LOAD_FAILED');
+    await expect(err).toContainText('This capture couldn’t be opened');
+    // Either the UI's own open timeout or the engine's storage timeout gets here first.
+    await expect(err.getByRole('button', { name: 'Reload this tab' })).toBeVisible();
+  });
+});
+
+test('keyboard: Tab reaches the capture, which scrolls with the keys', async ({ pagesnap }) => {
+  const { page } = await openSeeded(pagesnap, { cssW: 1280, cssH: 8000 });
+  await page.getByTestId('copy-button').focus();
+  await page.keyboard.press('Tab');
+  const stage = page.getByRole('main', { name: 'Capture' });
+  await expect(stage).toBeFocused();
+  await expect(page.getByTestId('keys-hint')).not.toHaveAttribute('data-hidden');
+  const y0 = (await uiState(page)).camera.y;
+  await page.keyboard.press('PageDown');
+  await expect.poll(async () => (await uiState(page)).camera.y).toBeGreaterThan(y0);
+  await page.keyboard.press('Home');
+  await expect.poll(async () => (await uiState(page)).camera.y).toBeLessThanOrEqual(y0);
+  await page.keyboard.press('Shift+Tab');
+  await expect(page.getByTestId('keys-hint')).toHaveAttribute('data-hidden');
+});
+
+for (const width of [820, 1000, 1100, 1280, 1440]) {
+  test.describe(`toolbar at ${width} px`, () => {
+    test.use({ windowSize: { width, height: 800 } });
+    test('fits without overlap', async ({ pagesnap }) => {
+      const { page } = await openSeeded(pagesnap);
+      expect(await page.evaluate(() => innerWidth)).toBe(width);
+      const boxes = await page.evaluate(() => {
+        const bar = document.querySelector('[data-testid="toolbar"]') as HTMLElement;
+        const els = [
+          ...bar.querySelectorAll<HTMLElement>('button, a.ps-ident, span.ps-ident'),
+        ].filter((el) => el.offsetParent !== null && el.getBoundingClientRect().width > 0);
+        return els.map((el) => {
+          const r = el.getBoundingClientRect();
+          return {
+            name: el.getAttribute('aria-label') ?? el.textContent ?? '',
+            x0: r.left,
+            x1: r.right,
+          };
+        });
+      });
+      for (const b of boxes) {
+        expect(b.x0, b.name).toBeGreaterThanOrEqual(0);
+        expect(b.x1, b.name).toBeLessThanOrEqual(width);
+      }
+      for (let i = 0; i < boxes.length; i++) {
+        for (let j = i + 1; j < boxes.length; j++) {
+          const a = boxes[i];
+          const b = boxes[j];
+          if (!a || !b) continue;
+          const overlap = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+          expect(overlap, `${a.name} / ${b.name}`).toBeLessThanOrEqual(0.5);
+        }
+      }
+      const kbd = page.getByTestId('copy-button').locator('kbd');
+      if (width <= 860) await expect(kbd).toBeHidden();
+      else await expect(kbd).toBeVisible();
+      if (width <= 1040) await expect(page.getByTestId('page-title')).toBeHidden();
+      else await expect(page.getByTestId('page-title')).toBeVisible();
+    });
+  });
+}
 
 test('a11y smoke: names, roles, keyboard focus, tooltips', async ({ pagesnap }) => {
   const { page } = await openSeeded(pagesnap);

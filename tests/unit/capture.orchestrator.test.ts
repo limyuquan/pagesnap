@@ -174,25 +174,46 @@ describe('badge', () => {
   });
 });
 
-describe('heightChanged', () => {
-  const slice = (h: number) =>
-    ({
-      index: 0,
-      scroll: { x: 0, y: 0 },
-      bitmap: { w: 1, h: 1 },
-      capturedAt: 0,
-      target: {
-        kind: 'document',
-        clientRect: { x: 0, y: 0, w: 1, h: 1 },
-        range: { x0: 0, x1: 0, y0: 0, y1: 0 },
-        content: { w: 1, h },
-      },
-    }) as const;
+describe('snapScale', () => {
+  it('snaps the measured scale to devicePixelRatio when they agree (browser zoom)', async () => {
+    const { snapScale } = await import('@/capture/orchestrator');
+    // 110% zoom at DPR 2: innerWidth 1163 is rounded, so 2560 / 1163 = 2.2012.
+    expect(snapScale(2560 / 1163, 2.200000047683716)).toBe(2.2);
+    expect(snapScale(2560 / 853, 3.0000001)).toBe(3); // 150%
+    expect(snapScale(2, 2)).toBe(2);
+    // Disagreement (emulation, forced scale): keep what the bitmap says.
+    expect(snapScale(2, 1)).toBe(2);
+    expect(snapScale(1.5, undefined)).toBe(1.5);
+    expect(snapScale(0, 2)).toBe(1);
+  });
+});
 
-  it('flags content height changes beyond rounding', async () => {
-    const { heightChanged } = await import('@/capture/orchestrator');
-    expect(heightChanged([slice(8000), slice(8000), slice(8001)])).toBe(false);
-    expect(heightChanged([slice(23_243), slice(20_230)])).toBe(true);
-    expect(heightChanged([slice(5000)])).toBe(false);
+describe('shiftConsensus', () => {
+  it('agrees on the movement of most anchors', async () => {
+    const { shiftConsensus } = await import('@/capture/anchor');
+    expect(shiftConsensus([0, 0, 0.2, Number.NaN])).toEqual({
+      d: 0,
+      n: 3,
+      reliable: true,
+      moved: false,
+    });
+    const grown = shiftConsensus([120, 120.4, 119.8, 120, 0]);
+    expect(grown.reliable).toBe(true);
+    expect(grown.d).toBeCloseTo(120, 0);
+    expect(shiftConsensus([-48, -48, -48]).d).toBe(-48);
+  });
+
+  it('refuses to guess when anchors disagree or are gone', async () => {
+    const { shiftConsensus } = await import('@/capture/anchor');
+    const split = shiftConsensus([0, 0, 50, 50, 90]);
+    expect(split.reliable).toBe(false);
+    expect(split.moved).toBe(true);
+    expect(split.d).toBe(0);
+    expect(shiftConsensus([Number.NaN, Number.NaN])).toEqual({
+      d: 0,
+      n: 0,
+      reliable: false,
+      moved: false,
+    });
   });
 });

@@ -65,7 +65,7 @@ export interface HighlightShape extends ShapeBase {
   b: Point;
   /** Band thickness, image px. */
   thickness: number;
-  /** 0..1, default 0.45. */
+  /** 0..1, default 0.6 (`DEFAULT_HIGHLIGHT_OPACITY`). */
   opacity: number;
 }
 
@@ -150,7 +150,7 @@ export function migrateDoc(raw: unknown): AnnotationDoc | null {
 export const PALETTE: readonly Color[] = [
   '#FF3B30', // red
   '#FF9500', // orange
-  '#FFD60A', // yellow
+  '#FFCC00', // yellow (also the highlighter's)
   '#34C759', // green
   '#0A84FF', // blue
   '#AF52DE', // purple
@@ -159,8 +159,9 @@ export const PALETTE: readonly Color[] = [
 ];
 
 export const DEFAULT_COLOR: Color = '#FF3B30';
-export const DEFAULT_HIGHLIGHT_COLOR: Color = '#FFD60A';
-export const DEFAULT_HIGHLIGHT_OPACITY = 0.45;
+/** Highlighter: `#FFCC00` at 0.6, multiply (design review §3: reads apart from a page's own marks). */
+export const DEFAULT_HIGHLIGHT_COLOR: Color = '#FFCC00';
+export const DEFAULT_HIGHLIGHT_OPACITY = 0.6;
 
 /**
  * Default size per tool in **CSS px** (multiply by `dpr` at creation). Meaning per kind:

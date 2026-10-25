@@ -65,6 +65,71 @@ export function rectOf(el: Element): Rect {
   return { x: r.left, y: r.top, w: r.width, h: r.height };
 }
 
+/** At most this many descendants are measured per `visibleExtent` call (app shells are huge). */
+export const EXTENT_MAX_NODES = 400;
+
+/**
+ * The part of `el` that paints inside `bounds` (normally the viewport): the union of its own box
+ * and the boxes of its visible descendants, including shadow trees. A `position: fixed` wrapper
+ * with a 0 px box whose absolutely positioned child is the real header (w3schools) gets the child's
+ * box instead of an empty one.
+ * - Subtrees that are `display: none` or `opacity: 0` are skipped; `visibility: hidden` and boxes
+ *   under 2 px (screen-reader-only text) don't count, but their descendants still can.
+ * - Descendants are clipped by ancestors (within `el`, including `el`) that clip overflow, unless
+ *   they are themselves fixed. Everything is clipped to `bounds`, so off-screen parts never count.
+ * - Measures at most `maxNodes` descendants (breadth-first) and returns the union so far.
+ * Returns an empty rect (w = h = 0) when nothing is visible.
+ */
+export function visibleExtent(el: Element, bounds: Rect, maxNodes = EXTENT_MAX_NODES): Rect {
+  let x0 = Number.POSITIVE_INFINITY;
+  let y0 = Number.POSITIVE_INFINITY;
+  let x1 = Number.NEGATIVE_INFINITY;
+  let y1 = Number.NEGATIVE_INFINITY;
+  const add = (r: Rect) => {
+    x0 = Math.min(x0, r.x);
+    y0 = Math.min(y0, r.y);
+    x1 = Math.max(x1, r.x + r.w);
+    y1 = Math.max(y1, r.y + r.h);
+  };
+  const ownRect = rectOf(el);
+  const ownStyle = getComputedStyle(el);
+  const own = clipRect(ownRect, bounds);
+  if (ownStyle.visibility !== 'hidden' && own.w > 0 && own.h > 0) add(own);
+  const rootClip = clipsOverflow(ownStyle) ? clipRect(ownRect, bounds) : bounds;
+  // Breadth-first, so a capped walk of a big shell still sees its top-level structure.
+  const queue: { node: Element; clip: Rect }[] = [];
+  const pushChildren = (parent: Element, clip: Rect) => {
+    if (clip.w <= 0 || clip.h <= 0) return;
+    const sr = shadowRootOf(parent);
+    if (sr) for (const c of sr.children) if (queue.length < maxNodes) queue.push({ node: c, clip });
+    for (const c of parent.children) if (queue.length < maxNodes) queue.push({ node: c, clip });
+  };
+  pushChildren(el, rootClip);
+  for (let head = 0; head < queue.length; head++) {
+    const item = queue[head];
+    if (!item) break;
+    const { node } = item;
+    const cs = getComputedStyle(node);
+    if (cs.display === 'none' || Number(cs.opacity) === 0) continue;
+    const clip = cs.position === 'fixed' ? bounds : item.clip;
+    const r = rectOf(node);
+    if (cs.visibility !== 'hidden' && r.w >= 2 && r.h >= 2) {
+      const v = clipRect(r, clip);
+      if (v.w > 0 && v.h > 0) add(v);
+    }
+    if (queue.length < maxNodes && (node.firstElementChild || shadowRootOf(node))) {
+      pushChildren(node, clipsOverflow(cs) ? clipRect(r, clip) : clip);
+    }
+  }
+  if (x1 <= x0 || y1 <= y0) return { x: bounds.x, y: bounds.y, w: 0, h: 0 };
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+function clipsOverflow(cs: CSSStyleDeclaration): boolean {
+  if (cs.display === 'contents') return false;
+  return cs.overflowX !== 'visible' || cs.overflowY !== 'visible' || cs.contain.includes('paint');
+}
+
 export function clipRect(r: Rect, to: Rect): Rect {
   const x = Math.max(r.x, to.x);
   const y = Math.max(r.y, to.y);
@@ -96,25 +161,25 @@ export async function frames(n = 1): Promise<void> {
 }
 
 /**
- * Wait (at most `capMs`) for images intersecting `area` to load and decode. Resolves with the
- * number still pending at the cap.
+ * Wait (at most `capMs`) for images intersecting `waitArea` (default `area`) to load and decode.
+ * Resolves with the number of images intersecting `area` still pending at the cap.
  */
-export async function waitForImages(area: Rect, capMs: number): Promise<number> {
+export async function waitForImages(area: Rect, capMs: number, waitArea = area): Promise<number> {
   const pending: Promise<unknown>[] = [];
   let unfinished = 0;
   for (const img of document.images) {
     if (!img.currentSrc && !img.src) continue;
     const r = img.getBoundingClientRect();
     if (r.width < 1 || r.height < 1) continue;
-    if (!intersects({ x: r.left, y: r.top, w: r.width, h: r.height }, area)) continue;
+    const box = { x: r.left, y: r.top, w: r.width, h: r.height };
+    if (!intersects(box, waitArea)) continue;
     if (img.complete && img.naturalWidth === 0) continue; // broken image: nothing to wait for
-    unfinished++;
-    pending.push(
-      img.decode().then(
-        () => unfinished--,
-        () => unfinished--,
-      ),
-    );
+    const counts = intersects(box, area);
+    if (counts) unfinished++;
+    const done = () => {
+      if (counts) unfinished--;
+    };
+    pending.push(img.decode().then(done, done));
   }
   if (pending.length === 0) return 0;
   await Promise.race([Promise.all(pending), sleep(capMs)]);

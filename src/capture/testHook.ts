@@ -7,11 +7,14 @@ import { compositeRegion } from '@/shared/composite';
 import { getSession, getSliceBlob } from '@/shared/db';
 import type { CaptureSession, Rect, SessionId } from '@/shared/types';
 import { activeCaptureId, cancelCapture, testFlags } from './orchestrator';
+import { type RetentionOptions, type RetentionResult, runRetention } from './retention';
 import { type CaptureTimings, getTimings } from './timings';
 
 export interface CaptureTestHook {
   /** Make the next captures behave as if the page couldn't be scripted. */
   forceRestricted(on: boolean): void;
+  /** Set test-only switches (slice/final write failures, pause limit). Returns the new flags. */
+  setFlags(flags: Partial<typeof testFlags>): typeof testFlags;
   activeId(): SessionId | null;
   /** What a toolbar click does during a capture. */
   cancel(): boolean;
@@ -21,6 +24,8 @@ export interface CaptureTestHook {
   compositePng(id: SessionId, region?: Rect, scale?: number): Promise<string>;
   /** Display tile `index` through `openCaptureSource` (the editor's path). Base64 PNG. */
   tilePng(id: SessionId, index: number): Promise<string>;
+  /** Run the SW retention pass now (default `force: true`, so the start-up throttle is skipped). */
+  runRetention(opts?: RetentionOptions): Promise<RetentionResult>;
 }
 
 declare global {
@@ -31,12 +36,17 @@ export const captureTestHook: CaptureTestHook = {
   forceRestricted(on) {
     testFlags.forceRestricted = on;
   },
+  setFlags(flags) {
+    Object.assign(testFlags, flags);
+    return { ...testFlags };
+  },
   activeId: activeCaptureId,
   cancel: cancelCapture,
   async session(id) {
     return (await getSession(id)) ?? null;
   },
   timings: getTimings,
+  runRetention: (opts = {}) => runRetention({ force: true, ...opts }),
   async compositePng(id, region, scale = 1) {
     const session = await getSession(id);
     if (!session) throw new Error('NO_SESSION');

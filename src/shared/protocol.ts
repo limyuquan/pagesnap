@@ -52,6 +52,11 @@ export type ToAgent =
   | { id: number; t: 'prepare'; session: SessionId; opts: CaptureOptions }
   /** Scroll to the next planned position, settle, and report. */
   | { id: number; t: 'step' }
+  /**
+   * The page was hidden and is visible again: let it repaint at the current position, then report
+   * (`settled`). Nothing is scrolled.
+   */
+  | { id: number; t: 'settle' }
   /** Undo every page mutation and scroll back to where the user was. */
   | { id: number; t: 'restore' };
 
@@ -60,7 +65,21 @@ export type AgentErrorCode =
   | 'SCROLL_JACKED'
   | 'PINCH_ZOOM'
   | 'ABORTED_BY_USER'
+  /** The agent's session was restored (Esc, hide, disconnect) while the request ran. */
+  | 'ABORTED'
+  /** The page's URL changed (SPA route change) since `prepare`. */
+  | 'NAVIGATED'
   | 'INTERNAL';
+
+/** Per-slice observations the SW turns into session warnings. */
+export interface SliceNotes {
+  /** The page grew past `maxCssHeight` (or the slice cap): the output stops at the limit. */
+  truncated?: boolean;
+  /** Content moved in a way the agent couldn't re-anchor: this seam may be misaligned. */
+  misaligned?: boolean;
+  /** Images in view still loading when the wait gave up. */
+  imagesPending?: number;
+}
 
 /** Agent → SW. Every reply echoes the request id in `re`. */
 export type FromAgent =
@@ -73,6 +92,8 @@ export type FromAgent =
       /** Planned number of slices (may change if the page grows). */
       estSlices: number;
       warnings: string[];
+      /** `window.devicePixelRatio` (includes browser zoom), to snap the measured scale. */
+      dpr: number;
     }
   | {
       re: number;
@@ -82,10 +103,21 @@ export type FromAgent =
       /** Actual scroll offsets of the target, CSS px (read back after settling). */
       scrollX: number;
       scrollY: number;
+      /** Where the slice goes in the output (see `SliceMeta.place`). */
+      place: { x: number; y: number };
       last: boolean;
       target: TargetGeometry;
+      /** `document.visibilityState === 'visible'` when the reply was sent. */
+      visible: boolean;
+      notes: SliceNotes;
+      /**
+       * Replace slice `i` with this one: the page moved while slice `i` was being shot, so that
+       * screenshot may show either state.
+       */
+      retake?: boolean;
     }
-  | { re: number; t: 'done' }
+  | { re: number; t: 'settled'; visible: boolean }
+  | { re: number; t: 'done'; notes?: SliceNotes }
   | { re: number; t: 'restored' }
   | { re: number; t: 'error'; code: AgentErrorCode; detail?: string };
 
@@ -98,7 +130,13 @@ export interface AgentAbort {
   code: 'ABORTED_BY_USER' | 'PAGEHIDE';
 }
 
-export type FromAgentAny = FromAgent | AgentAbort;
+/** Unsolicited agent → SW message: the page became hidden or visible (occluded window, tab hidden). */
+export interface AgentVisibility {
+  t: 'visibility';
+  visible: boolean;
+}
+
+export type FromAgentAny = FromAgent | AgentAbort | AgentVisibility;
 
 // ---------------------------------------------------------------------------------------------
 // SW → editor hand-off (see handoff.ts)
@@ -115,3 +153,25 @@ export const sessionStatusKey = (id: SessionId): string => `session-status:${id}
 
 /** `chrome.storage.session` key holding the id of the capture in progress (one at a time). */
 export const ACTIVE_CAPTURE_KEY = 'active-capture';
+
+/** `chrome.storage.session` key holding the tab id of the capture in progress (badge cleanup). */
+export const ACTIVE_CAPTURE_TAB_KEY = 'active-capture-tab';
+
+/** `chrome.storage.session` key of a capture's timing report (A-private, see capture/timings.ts). */
+export const timingsKey = (id: SessionId): string => `capture-timings:${id}`;
+
+/**
+ * A `capturing` session whose status mirror hasn't been refreshed for this long is presumed dead
+ * (the SW was killed). The running SW refreshes `updatedAt` every `CAPTURE_HEARTBEAT_MS`.
+ */
+export const STALE_CAPTURE_MS = 20_000;
+export const CAPTURE_HEARTBEAT_MS = 5_000;
+
+/**
+ * `runtime.sendMessage` from an extension page to the SW: "this session looks stale, recover it".
+ * Sending any message wakes a terminated SW, whose start-up recovery then marks the session.
+ */
+export interface RecoverRequest {
+  t: 'pagesnap/recover';
+  id: SessionId;
+}

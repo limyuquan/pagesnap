@@ -119,7 +119,7 @@ capturing ──► ready     (all slices stored, layout final)
 
   A builds it, including the inner-scroller "expand in place" bands and fills from 01 §3.4.
   Nobody else interprets slices.
-- Retention uses `pruneSessions({ keep, maxAgeMs })` from `settings.storage`. A runs it on `runtime.onStartup`.
+- Retention: `RETENTION` in `db.ts`, applied by `runRetention` (`capture/retention.ts`) after every capture, on SW start and on browser start (see §8, Phase 4 F1).
 
 ### 4.3 Storage
 
@@ -452,6 +452,197 @@ Log:
     `pagesnap:seen-info`), never as a warning.
   - `BackgroundTestHook.clickAction(tabId)` (e2e only), see §4.10.
   - Vitest browser project pre-bundles `perfect-freehand` and `idb` (`optimizeDeps.include`).
+
+- **2026-10-25, Phase 4 F3 (UI), `settings.editor.copyScope` + requests to F2/F1** (affects: F2, flow tests).
+  - `Settings['editor'].copyScope: 'fill' | 'tight'` (default `'fill'`) is in `shared/settings.ts`.
+    `fill` = design §5 (fill the 2576 px budget, from the top when the marks fit); `tight` = the
+    old bbox + pad crop. The options page writes it ("⌘C on tall pages"). F2 reads it.
+  - Toast titles change (design §4): smart copies say **`Copied around your marks`** (was "Copied the
+    area around your marks"); a no-marks copy says **`Copied from here down`** (was "Copied the
+    current view"). `Copied full page` and `Saved <file>` are unchanged. `flow.helpers.ts` already
+    accepts `/^Copied/` (F2's change).
+  - Zoom label shows `Fit` from F2's `selectIsFitWidth` (consumed).
+  - **Note to F2:** `_panZoom` (wheel/drag pan) clears `_fit` even when the zoom is unchanged, so
+    `selectIsFitWidth` turns false on the first scroll. The UI copes (the label stays `Fit` while
+    the zoom equals the last fit zoom), but if a pan at fit zoom should keep following fit-width
+    on resize, `_panZoom` could pass `get()._fit && camera.zoom === get().camera.zoom` like
+    `setCamera` does.
+  - **Request to F2 (nice):** a 2 px dot cursor for Highlighter and Pen
+    (`url(...) 8 8, crosshair`); cursors are set inline by the controller, so C can't do it in CSS.
+  - **Consumed from F2:** `copied.scope` (`kind`, `cssBottom`, `cssHeight`, `pageCssHeight`) for
+    the toast wording, falling back to `outcome` + PNG size for older states; `failed.reason`
+    `loading` ("Still loading the capture…") and `timeout` ("Copying took too long" / "Saving took
+    too long"); `download.failed.reason`; `externalEditAt` (quiet "Updated from another tab" toast);
+    the new keys (documented on the options page). Raw error codes never reach a toast.
+  - **Consumed from F1:** `NOT_SCROLLABLE` (after `TRUNCATED` in the notice order),
+    `STORAGE_FAILED` / `INTERRUPTED` error copy, `ABORTED_BY_USER` uses `error.message`,
+    `deleteAllSessions` / `getStorageUsage` on the options page (looked up defensively), the 5 s
+    heartbeat (`updatedAt` on the status mirror). `INNER_SCROLLER` is no longer a strip: it's a line
+    in the page title's tooltip ("Captured the scrolling panel as one page.").
+  - **Editor UI watchdogs** (`src/editor/ui/stuck.ts`): no status update for 15 s while capturing →
+    "The capture stopped responding" with a retry hint (F1's 20 s recovery then moves the editor
+    on); still opening after 20 s of visible time → `LOAD_FAILED` error with "Reload this tab".
+    e2e can shorten both via `window.__pagesnapUiTiming = { stallMs, openMs }`.
+  - **Stage is a tab stop** (`<main aria-label="Capture" tabIndex=0>`, after Copy) so keyboard users
+    can scroll the capture; a keys hint shows while it has keyboard focus. Its target isn't
+    "interactive" in `isInteractiveTarget`, so the engine's keys apply.
+  - `mergeSettings` now repairs out-of-range stored values (enums, `keepSessions`/`maxAgeDays ≥ 1`).
+  - **Seen by F3 in the full e2e run (14:2x), for F1:** (a) engine tests that seed a session and
+    then copy fail with `Slice <id>#0 not found`: the slices of a freshly seeded session disappear,
+    which looks like the new retention pruning it; (b) `flow.command.spec.ts:83` still expects the
+    notice to contain "Capture cancelled." but the engine message is now "You clicked Page Snap
+    again, so the capture stopped early." (the UI shows `error.message` as asked).
+
+- **2026-10-25, Phase 4 F2 (engine), store API additions** (affects: F3; all additive, every
+  existing field keeps its meaning).
+  - **`copy` `copied` gains `scope?: CopyScopeInfo`** (exported type; always set by the engine, typed
+    optional so older literals still compile):
+    `{ kind: 'full' | 'fromTop' | 'aroundMarks' | 'fromHere'; mode: 'fill' | 'tight';
+    region: Rect /* image px, after edge snapping */; cssTop: number; cssBottom: number;
+    cssHeight: number; pageCssHeight: number /* all CSS px, rounded */ }`.
+    `outcome` stays (`full`; `smart` = any marks-based scope; `viewport` = `fromHere`). `size` is the
+    final PNG size (after snapping). `tall` is unchanged (marks taller than the budget). With
+    `mode: 'tight'` the kind is `aroundMarks` (or `fromTop` when the crop starts at y 0). With no marks
+    the kind is `fromHere` in both modes. Toast wording from these: "From the top of the page down
+    to `cssBottom`. ⇧⌘C copies all `pageCssHeight`", "`cssHeight` of `pageCssHeight` px".
+  - **`copy` `failed.reason`** adds `'loading'` (⌘C before the editor is ready: say "Still
+    loading…", message `Still loading`) and `'timeout'` (export or clipboard write didn't finish
+    in time). `not-focused` / `error` unchanged.
+  - **`download` `failed`** gains optional `reason?: 'loading' | 'timeout' | 'error'`. ⌘S before
+    ready now reports `failed { reason: 'loading' }` instead of doing nothing.
+  - **`selectIsFitWidth(s): boolean`** (C's request): true while the camera follows fit-width.
+  - **`externalEditAt: number | null`**: set (Date.now()) when this tab adopted a newer doc written
+    by another editor tab of the same capture (BroadcastChannel sync; this tab's undo history is
+    reset at that point). C may show a quiet "Updated from another tab" notice; optional.
+  - **Keys now handled by the engine** (C must not bind them globally): with nothing selected,
+    ↑/↓/←/→ scroll, PageUp/PageDown and Space/⇧Space page, Home/End jump to the top/bottom; with a
+    selection the arrows nudge 1 CSS px (⇧ = 10), one undo step per burst. ⌘C inside an open text
+    box with no text selected commits the text and copies the image. Keys whose target is a
+    button, link, menu item, radio or other interactive control are left alone (Space activates
+    buttons again).
+  - **Copied-region flash** is drawn by the renderer on every successful copy (no React).
+  - **Highlighter default is `#FFCC00` at 0.6** (design §3); `PALETTE[2]` (yellow) becomes
+    `#FFCC00` too, so the highlighter's colour is still a palette swatch. Shapes already stored keep
+    their colours.
+  - **Right-click "Copy image"** now copies exactly what ⌘C's default scope would copy (small, so
+    it pre-encodes fast); the `<img>` is cleared the moment the doc changes.
+    If it isn't ready at right mouse-down, the native menu opens on the canvas (no "Copy image"
+    item rather than a stale one) and the encode jumps the queue; it's typically back in ~0.1–0.4 s.
+  - **Compositor (now F2):** `openCaptureSource` returns a `LodCaptureSource` (`CaptureSource` +
+    `getRegionBitmap(rect, scale, { signal, priority })`; `isLodSource()`), so `shared/source.ts`
+    is unchanged and `getTileBitmap` still works (F1's `capture/testHook.ts` uses it). Scales ≤ 1/8
+    are drawn from per-slice thumbnails kept in the worker. The editor's tile cache is a
+    level-of-detail pyramid with a byte-bounded, loop-free prefetch (`tiles.ts` header).
+  - **C's requests, done:** `selectIsFitWidth` exists; `_panZoom` (wheel/drag pan) keeps fit-width
+    while the zoom is unchanged, so a window resize after scrolling still refits (any zoom change
+    leaves it). Cursors: Pen = 2 px dot with a white rim, Highlighter = a short flat bar (both
+    `url(...) 8 8, crosshair`), set inline by the controller.
+  - **Export watchdog:** timeouts count from when a job starts running (the runner posts
+    `{ t: 'start', id }`), so a copy queued behind a long download can't time out and restart the
+    worker under it; a worker that never starts or never finishes a job still times out.
+  - **E2E-only hooks:** `__pagesnapEngine.tiles()` (level, in-flight, loads, MB) and
+    `__pagesnapEngine.flash()` (`{ region, alpha }` or null).
+  - **Tests touched outside `engine.*`:** `tests/e2e/flow.helpers.ts` now takes the copied region
+    from `copy.scope.region` (edge snapping can move a cut ≤ 48 CSS px), uses
+    `DEFAULT_HIGHLIGHT_COLOR/OPACITY`, and accepts `/^Copied/` as the smart-copy toast title (C's
+    request above).
+  - **Found while testing, for F1:** start-up retention (`runRetention({ reason: 'startup' })` →
+    `deleteOrphans`) deletes the slices of a session that is still being written: the synthetic
+    seeder (and any writer) puts slices before the session record, so e2e tests that seed right
+    after the SW starts intermittently get `Slice <id>#0 not found` (blank tiles, failed copies).
+    Orphan cleanup needs a grace period (e.g. skip slice owners younger than a few minutes) or the
+    seeder must write the session first.
+
+- **2026-10-25, Phase 4 F1 (capture), additive shared changes** (affects: F3 mostly, F2 lightly).
+  All additive; no DB version bump (new fields are optional).
+  - **`types.ts`:**
+    - `CaptureErrorCode` gains `'STORAGE_FAILED'` (IDB write failed, e.g. disk full). The message
+      is user-readable as is.
+    - `CaptureWarningCode` gains `'NOT_SCROLLABLE'`: the page couldn't scroll at all (a cookie
+      wall or dialog locked it), so one screen was captured. **F3: add it to `WARNING_ORDER`**
+      (after `TRUNCATED`); `warning.message` carries the sentence.
+    - `INFO_WARNING_CODES = ['INNER_SCROLLER']` is exported. `INNER_SCROLLER` stays in
+      `session.warnings` as data, documented as informational.
+    - `HEIGHT_CHANGED` is now raised only when a change actually affected placement (growth that
+      was followed or re-anchored is silent), and `IMAGES_PENDING` is now really raised.
+    - `SliceMeta.place?: Point`: where the slice goes in the output (CSS px, same space as
+      `scroll`). It differs from `scroll` when content above was re-anchored. Only `layout.ts`
+      reads it; nobody else interprets slices.
+    - `CaptureSession.bytes?: number`: the total size of the stored slice PNGs.
+  - **`db.ts`, for F3's options page:**
+    - `deleteAllSessions(): Promise<number>` deletes every session with its slices and docs,
+      except a capture that is running right now. It returns the count.
+    - `getStorageUsage(): Promise<StorageUsage>` returns
+      `{ sessions, bytes, budget, usage: number | null, quota: number | null }` (`bytes` = slice
+      PNGs; `budget` = the retention byte cap; `usage`/`quota` from `navigator.storage.estimate()`).
+    - Retention is now `RETENTION` in `db.ts`, applied after every capture and on SW start: keep
+      the newest 10, delete anything older than 7 days, cap the total at
+      `min(1 GB, 10% of quota)`, never delete a session whose editor tab is open or that is still
+      capturing. **`settings.storage.keepSessions` and `maxAgeDays` are no longer read by the
+      capture side.** F3 may drop them from `Settings` or leave them; nothing depends on them.
+  - **`handoff.ts`:**
+    - `waitForFinalSession` never hangs any more:
+      - A storage error rejects with that error (the store maps it to `LOAD_FAILED`).
+      - A `capturing` snapshot whose `updatedAt` is older than `STALE_CAPTURE_MS` (20 s,
+        `protocol.ts`) wakes the SW, which marks the session `INTERRUPTED`: `partial` if it has
+        slices, `error` if not.
+      - If the final IDB write failed, it resolves with a `status: 'error'` session carrying the
+        mirror's error.
+    - The running SW refreshes `updatedAt` in the mirror every 5 s as a heartbeat, including
+      while paused.
+    - `isStaleSnapshot(snap, now?)` is exported for UIs that want to show "interrupted" early.
+    - `watchSessionStatus(id, cb, onError?)` gains an optional `onError`. When the mirror key is
+      removed, it now re-reads IDB instead of calling `cb(null)`. Mirrors of finished sessions are
+      removed by retention about a minute after they finish.
+  - **Cancel wording:** `ABORTED_BY_USER` messages now say how the capture was stopped: "You
+    pressed Esc, so the capture stopped early." or "You clicked Page Snap again, so the capture
+    stopped early." **F3:** prefer `error.message` over any fixed Esc wording.
+  - **Pause:** a hidden tab or minimised window now pauses the capture instead of stopping it.
+    The badge shows `II` and the capture resumes when the page is visible again. After 30 s it
+    stops with `TAB_CHANGED` "The tab stayed hidden (or the window minimised) for too long, so
+    the capture stopped early." The badge shows `…` while waiting for a loading page or while a
+    second tab's capture is queued.
+  - **Manifest:** `"incognito": "split"`. Incognito captures live in the incognito profile's
+    in-memory storage and are never written to disk. The editor opens inside the incognito
+    window.
+
+- **2026-10-25, Phase 4 F1, follow-up (closes F2/F3's "Slice … not found" and the
+  `flow.command` items above):**
+  - Retention now has a grace period, `RETENTION.minAgeMs` (1 h). Automatic retention never
+    deletes:
+    - a session younger than that, whatever the count or the byte budget;
+    - any session that isn't final. A dead capture is first made final by recovery.
+    - any session with an editor tab open;
+    - orphan slices or docs whose time-sortable id (`sessionIdTime`) is younger than the grace
+      period, or that can't be parsed. Writers that store slices before their session record
+      (the synthetic seeder, a capture in flight) are therefore safe.
+
+    So a user who captures a dozen pages quickly and opens the editors later keeps them all.
+  - `flow.command.spec.ts` now expects "You clicked Page Snap again, so the capture stopped early."
+    Alt+Shift+P dispatches the toolbar action, so that wording is accurate.
+  - **New fixtures** (added, none changed). All three are deterministic with no network, and each
+    exposes `window.__fixture`.
+
+    | Page | Size (CSS px) | What it checks |
+    |---|---|---|
+    | `fixed-zero-wrapper.html` | 6056; 12 × 500 bands from y=56 | A w3schools-style 0 px `position: fixed` wrapper around an absolutely positioned 56 px nav (`#282a35`). The nav appears once and never covers content. `#ff00aa` decoys (a clipped menu, an off-screen skip link, a `display: none` panel) must never show |
+    | `fixed-sidebar.html` | 6056; bands from y=56, x=230 | A full-height fixed left sidebar (230 px, `#e7e9eb`) shown in **every** slice, a 56 px fixed header in the first slice only, and a chat bubble in the last slice only |
+    | `growing.html` | ~8500 at load, growing to ~11,000 | Code blocks that expand after 200 or 460 ms on screen, placeholders that collapse, ad slots that grow once scrolled past, and a footer that appends two bands three times after 300 ms in view. Every band has its own colour (`__fixture.bands()`), so duplicated or dropped seams are detectable |
+
+  - **Capture behaviour (informational, no shape change):**
+    - Fixed elements are classified by their visible extent: their own box plus visible
+      descendants. A new float kind, `side` (full-height sidebars docked left or right), is kept
+      in every slice, in place.
+    - The agent follows the live page height, extending the capture when the page grows, up to
+      `maxCssHeight` and `MAX_SLICES`.
+    - It re-anchors each row on content just above the seam. If content near the bottom of a
+      slice moved while it was being shot, it takes that slice again (at most 8 per capture,
+      2 per slice). The SW now asks for steps until the agent replies `done`, and the
+      `positioned` reply carries `place`, `visible`, `notes` and `retake?`.
+
+  - §4.2's retention line is superseded by `RETENTION` (`db.ts`) + `runRetention`
+    (`capture/retention.ts`), run after every capture, on SW start (throttled to 10 min) and on
+    browser start.
 
 ## 9. Decisions made in Phase 0
 

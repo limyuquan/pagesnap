@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: fixed sidebar</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  w3schools-style layout (qa-sitesB I-2):
+  - a 56 px fixed top header (#282a35, "HEADER"): expected in the first slice only;
+  - a full-height fixed left sidebar `#sidenav` (230 px, `top: 0; bottom: 0`, #e7e9eb, under the
+    header, 56 px top padding) with a fixed inner menu `#sidenav-inner` (height set to
+    innerHeight from JS, scrolls on its own). Its box is centred on the viewport exactly, which
+    used to tie-break it to `bottom`. Expected in every slice, so it runs down the whole left side;
+  - a 60 px chat bubble fixed at bottom-right (#34c759): expected in the last slice only.
+  Content: `margin-left: 230px`, 56 px top padding, 12 x 500 px bands (bands.html colours, 2 px
+  black top rule, labels).
+-->
+<style>
+  html, body { margin: 0; padding: 0; }
+  body { font: 16px/1.5 system-ui, sans-serif; color: #111; background: #fff; }
+  #header { position: fixed; top: 0; left: 0; right: 0; height: 56px; background: #282a35; color: #fff; display: flex; align-items: center; padding: 0 24px; font-weight: 700; z-index: 20; box-sizing: border-box; }
+  #sidenav { position: fixed; top: 0; bottom: 0; left: 0; width: 230px; background: #e7e9eb; padding-top: 56px; box-sizing: border-box; z-index: 10; }
+  #sidenav-inner { position: fixed; top: 56px; left: 0; width: 230px; overflow-y: auto; }
+  #sidenav-inner a { display: block; padding: 4px 16px 4px 40px; color: #000; text-decoration: none; }
+  .bubble { position: fixed; right: 24px; bottom: 24px; width: 60px; height: 60px; border-radius: 50%; background: #34c759; z-index: 30; }
+  #main { margin-left: 230px; padding-top: 56px; }
+  .band { height: 500px; box-sizing: border-box; border-top: 2px solid #000; padding: 16px 24px; font-weight: 600; font-size: 24px; }
+</style>
+</head>
+<body>
+<div id="header">HEADER</div>
+<div id="sidenav"><div id="sidenav-inner"></div></div>
+<div id="main"></div>
+<div class="bubble" aria-label="Chat"></div>
+<script>
+  const colors = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c'];
+  const main = document.getElementById('main');
+  for (let i = 0; i < 12; i++) {
+    const band = document.createElement('div');
+    band.className = 'band';
+    band.style.background = colors[i % 8];
+    band.textContent = `Band ${i}`;
+    main.append(band);
+  }
+  const inner = document.getElementById('sidenav-inner');
+  for (let i = 0; i < 40; i++) {
+    const a = document.createElement('a');
+    a.href = `#item-${i}`;
+    a.textContent = `Menu item ${i}`;
+    inner.append(a);
+  }
+  const size = () => { inner.style.height = `${innerHeight - 56}px`; };
+  size();
+  addEventListener('resize', size);
+  window.__fixture = {
+    name: 'fixed-sidebar',
+    cssHeight: 6056,
+    header: { height: 56, color: '#282a35' },
+    sidebar: { width: 230, color: '#e7e9eb', textLeft: 40 },
+    bubble: { size: 60, right: 24, bottom: 24, color: '#34c759' },
+    bands: { top: 56, left: 230, height: 500, count: 12 },
+    colors,
+  };
+</script>
+</body>
+</html>

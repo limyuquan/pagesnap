@@ -2,8 +2,9 @@
  * Build the final `BaseLayout` (the recipe for the base image) from the captured slices.
  * Pure, owner: A. See CONTRACTS §4.2 and 01 §3.4 / §5.7.
  *
- * - `document` target: every slice is the viewport at its scroll offset, placed at
- *   `round((scroll - start) * scale)`. The last row/column is aligned to the image edge so rounding
+ * - `document` target: every slice is the viewport at its output position `place` (the scroll
+ *   offset, re-anchored when content above it moved; see `SliceMeta.place`), placed at
+ *   `round((place - start) * scale)`. The last row/column is aligned to the image edge so rounding
  *   never leaves a 1 px gap (the 2 px overlap absorbs the shift).
  * - `element` target (inner scroller, "expand in place"): the band above and the rails beside the
  *   scroller come from slice 0, the scroller's client rect from every slice, the band below from the
@@ -55,25 +56,32 @@ export function buildLayout(input: LayoutInput): LayoutResult {
     : documentLayout(input, first, background);
 }
 
+/** Output position of a slice, CSS px in scroll space. */
+export function placeOf(s: SliceMeta): { x: number; y: number } {
+  return s.place ?? s.scroll;
+}
+
 function documentLayout(input: LayoutInput, first: SliceMeta, background: string): LayoutResult {
   const { slices, scale } = input;
   const { clientRect, range } = first.target;
   let maxX = range.x0;
   let maxY = range.y0;
   for (const s of slices) {
-    maxX = Math.max(maxX, s.scroll.x);
-    maxY = Math.max(maxY, s.scroll.y);
+    const p = placeOf(s);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
   }
   const css = { w: maxX - range.x0 + clientRect.w, h: maxY - range.y0 + clientRect.h };
   const image = { w: Math.round(css.w * scale), h: Math.round(css.h * scale) };
   const parts: Placement[] = [];
   for (const s of slices) {
     const src = scrollerBitmapRect(s.target.clientRect, scale, s.bitmap);
-    let x = Math.round((s.scroll.x - range.x0) * scale);
-    let y = Math.round((s.scroll.y - range.y0) * scale);
+    const p = placeOf(s);
+    let x = Math.round((p.x - range.x0) * scale);
+    let y = Math.round((p.y - range.y0) * scale);
     // Align the last row/column with the image edge (rounding can leave it 1 px short or long).
-    if (s.scroll.x === maxX) x = image.w - src.w;
-    if (s.scroll.y === maxY) y = image.h - src.h;
+    if (p.x === maxX) x = image.w - src.w;
+    if (p.y === maxY) y = image.h - src.h;
     pushClipped(parts, s.index, src, { x: Math.max(0, x), y: Math.max(0, y) }, image);
   }
   return { css, image, layout: { size: image, background, fills: [], parts } };
@@ -85,8 +93,8 @@ function elementLayout(input: LayoutInput, first: SliceMeta, background: string)
   let maxY = range.y0;
   let last = first;
   for (const s of slices) {
-    if (s.scroll.y >= maxY) {
-      maxY = s.scroll.y;
+    if (placeOf(s).y >= maxY) {
+      maxY = placeOf(s).y;
       last = s;
     }
   }
@@ -105,7 +113,7 @@ function elementLayout(input: LayoutInput, first: SliceMeta, background: string)
   for (const s of slices) {
     if (s === first) continue;
     const sr = scrollerBitmapRect(s.target.clientRect, scale, s.bitmap);
-    const dy = s === last ? extra : Math.round((s.scroll.y - range.y0) * scale);
+    const dy = s === last ? extra : Math.round((placeOf(s).y - range.y0) * scale);
     pushClipped(parts, s.index, sr, { x: sr.x, y: sr.y + dy }, image);
   }
   // 3. The band below the scroller from the last slice, shifted down.

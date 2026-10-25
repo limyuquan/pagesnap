@@ -112,5 +112,8 @@ test('pressing Alt+Shift+P again mid-capture cancels it, keeping what was captur
   expect(session.status).toBe('partial');
   expect(session.error?.code).toBe('ABORTED_BY_USER');
   await waitReady(editor);
-  await expect(editor.getByTestId('capture-notice')).toContainText('Capture cancelled.');
+  // Alt+Shift+P is the toolbar action, so the notice says the capture was stopped from there.
+  await expect(editor.getByTestId('capture-notice')).toContainText(
+    'You clicked Page Snap again, so the capture stopped early.',
+  );
 });

@@ -12,9 +12,9 @@
  */
 import { getSession, getSliceBlob } from '@/shared/db';
 import { DISPLAY_TILE_HEIGHT, DISPLAY_TILE_MAX_SIDE } from '@/shared/limits';
-import type { CaptureSource, OpenCaptureSource } from '@/shared/source';
+import type { CaptureSource } from '@/shared/source';
 import type { BaseLayout, Rect, SessionId, Size, TileMeta } from '@/shared/types';
-import type { FromWorker, ToWorker } from './messages';
+import type { FromWorker, TilePriority, ToWorker } from './messages';
 import { createTileRenderer } from './render';
 
 /** Row-major grid of display tiles covering `size`. */
@@ -43,15 +43,48 @@ export function compositorBackend(source: CaptureSource): 'worker' | 'in-thread'
   return backendKinds.get(source)?.() ?? null;
 }
 
+export type { TilePriority } from './messages';
+
+export interface RegionRequest {
+  signal?: AbortSignal;
+  /** `high` for tiles on screen, `low` for prefetch. Default `high`. */
+  priority?: TilePriority;
+}
+
+/**
+ * A `CaptureSource` that can also render any region at a reduced scale (the editor's
+ * level-of-detail tiles). `openCaptureSource` always returns one.
+ */
+export interface LodCaptureSource extends CaptureSource {
+  /**
+   * Render `rect` (image px) at `scale` output px per image px (≤ 1). The bitmap is
+   * `round(rect.w * scale) × round(rect.h * scale)`; the caller owns it and must close it.
+   */
+  getRegionBitmap(rect: Rect, scale: number, req?: RegionRequest): Promise<ImageBitmap>;
+}
+
+export function isLodSource(s: CaptureSource | null | undefined): s is LodCaptureSource {
+  return !!s && typeof (s as Partial<LodCaptureSource>).getRegionBitmap === 'function';
+}
+
 /** Tiles rendered eagerly when a source opens (the top of the page). */
 const PREFETCH_TILES = 2;
+/** Unclaimed eager tiles are released after this long (the view may never need them). */
+const PREFETCH_TTL_MS = 10_000;
 
 interface Backend {
-  render(rect: Rect): Promise<ImageBitmap>;
+  render(
+    rect: Rect,
+    scale: number,
+    priority: TilePriority,
+    signal?: AbortSignal,
+  ): Promise<ImageBitmap>;
   dispose(): void;
 }
 
-export const openCaptureSource: OpenCaptureSource = async (sessionId) => {
+const rectKey = (r: Rect) => `${r.x},${r.y},${r.w},${r.h}`;
+
+export const openCaptureSource = async (sessionId: SessionId): Promise<LodCaptureSource> => {
   mark('pagesnap:source-open', sessionId);
   const session = await getSession(sessionId);
   if (!session) throw new Error('NO_SESSION');
@@ -59,48 +92,79 @@ export const openCaptureSource: OpenCaptureSource = async (sessionId) => {
   if (session.status === 'error') throw new Error('CAPTURE_FAILED');
   const tiles = planDisplayTiles(session.image);
   let backend = createBackend(sessionId, session.layout);
+  let restarts = 0;
   let disposed = false;
   let firstMarked = false;
 
-  const renderTile = (index: number): Promise<ImageBitmap> => {
-    const tile = tiles[index];
-    if (!tile) return Promise.reject(new RangeError(`No tile ${index}`));
-    return backend.render(tile.rect).catch((err: unknown) => {
-      if (disposed || backend instanceof InThread) throw err;
-      // The worker failed (e.g. crashed): fall back to rendering in this thread.
+  const renderRegion = (
+    rect: Rect,
+    scale: number,
+    priority: TilePriority,
+    signal?: AbortSignal,
+  ): Promise<ImageBitmap> =>
+    backend.render(rect, scale, priority, signal).catch((err: unknown) => {
+      if (disposed || isAbort(err) || !(backend instanceof WorkerBackend) || !backend.dead) {
+        throw err;
+      }
+      // The worker died (e.g. crashed): restart it once, then render in this thread.
       backend.dispose();
-      backend = new InThread(sessionId, session.layout);
-      return backend.render(tile.rect);
+      backend =
+        restarts++ < 1
+          ? createBackend(sessionId, session.layout)
+          : new InThread(sessionId, session.layout);
+      return backend.render(rect, scale, priority, signal);
     });
-  };
 
   // Prefetched bitmaps are handed to the first caller of that tile, who then owns them.
-  const prefetched = new Map<number, Promise<ImageBitmap>>();
+  const prefetched = new Map<string, Promise<ImageBitmap>>();
   for (let i = 0; i < Math.min(PREFETCH_TILES, tiles.length); i++) {
-    const p = renderTile(i);
+    const rect = (tiles[i] as TileMeta).rect;
+    const key = rectKey(rect);
+    const p = renderRegion(rect, 1, 'high');
     p.catch(() => {});
-    prefetched.set(i, p);
+    prefetched.set(key, p);
+    setTimeout(() => {
+      if (prefetched.get(key) !== p) return;
+      prefetched.delete(key);
+      void p.then(
+        (b) => b.close(),
+        () => {},
+      );
+    }, PREFETCH_TTL_MS);
   }
 
-  const source: CaptureSource = {
+  const getRegionBitmap = async (
+    rect: Rect,
+    scale: number,
+    req: RegionRequest = {},
+  ): Promise<ImageBitmap> => {
+    if (disposed) throw new Error('DISPOSED');
+    const { signal } = req;
+    signal?.throwIfAborted();
+    const key = rectKey(rect);
+    const early = scale === 1 ? prefetched.get(key) : undefined;
+    if (early) prefetched.delete(key);
+    const work = early ?? renderRegion(rect, scale, req.priority ?? 'high', signal);
+    const bitmap = await abortable(work, signal);
+    if (disposed) {
+      bitmap.close();
+      throw new Error('DISPOSED');
+    }
+    if (!firstMarked) {
+      firstMarked = true;
+      mark('pagesnap:first-tile', sessionId);
+    }
+    return bitmap;
+  };
+
+  const source: LodCaptureSource = {
     session,
     tiles,
+    getRegionBitmap,
     async getTileBitmap(index, signal) {
-      if (disposed) throw new Error('DISPOSED');
-      signal?.throwIfAborted();
-      const early = prefetched.get(index);
-      prefetched.delete(index);
-      const work = early ?? renderTile(index);
-      const bitmap = await abortable(work, signal);
-      if (disposed) {
-        bitmap.close();
-        throw new Error('DISPOSED');
-      }
-      if (!firstMarked) {
-        firstMarked = true;
-        mark('pagesnap:first-tile', sessionId);
-      }
-      return bitmap;
+      const tile = tiles[index];
+      if (!tile) throw new RangeError(`No tile ${index}`);
+      return getRegionBitmap(tile.rect, 1, signal ? { signal } : {});
     },
     dispose() {
       if (disposed) return;
@@ -118,6 +182,10 @@ export const openCaptureSource: OpenCaptureSource = async (sessionId) => {
   return source;
 };
 
+function isAbort(err: unknown): boolean {
+  return (err as { name?: string })?.name === 'AbortError';
+}
+
 function createBackend(sessionId: SessionId, layout: BaseLayout): Backend {
   if (typeof Worker === 'undefined' || typeof OffscreenCanvas === 'undefined') {
     return new InThread(sessionId, layout);
@@ -134,8 +202,11 @@ class InThread implements Backend {
   constructor(sessionId: SessionId, layout: BaseLayout) {
     this.renderer = createTileRenderer(layout, (i) => getSliceBlob(sessionId, i));
   }
-  render(rect: Rect) {
-    return this.renderer.render(rect);
+  render(rect: Rect, scale: number, priority: TilePriority, signal?: AbortSignal) {
+    return this.renderer.render(rect, scale, {
+      priority,
+      isCancelled: () => signal?.aborted ?? false,
+    });
   }
   dispose() {
     this.renderer.dispose();
@@ -149,34 +220,53 @@ class WorkerBackend implements Backend {
     number,
     { resolve: (b: ImageBitmap) => void; reject: (e: Error) => void }
   >();
-  private dead = false;
+  dead = false;
 
   constructor(sessionId: SessionId, layout: BaseLayout) {
     this.worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
     this.worker.onmessage = (e: MessageEvent<FromWorker>) => {
       const msg = e.data;
+      if (msg.t === 'ready') return;
       const p = this.pending.get(msg.id);
       this.pending.delete(msg.id);
       if (msg.t === 'tile') {
         if (p) p.resolve(msg.bitmap);
         else msg.bitmap.close();
-      } else {
-        p?.reject(new Error(msg.message));
+      } else if (p) {
+        const err =
+          msg.name === 'AbortError'
+            ? new DOMException(msg.message, 'AbortError')
+            : Object.assign(new Error(msg.message), { name: msg.name ?? 'Error' });
+        p.reject(err as Error);
       }
     };
     this.worker.onerror = (e) => {
       e.preventDefault();
       this.fail(new Error(`Compositor worker failed: ${e.message}`));
     };
+    this.worker.onmessageerror = () => this.fail(new Error('Compositor worker message error'));
     this.post({ t: 'init', sessionId, layout });
   }
 
-  render(rect: Rect): Promise<ImageBitmap> {
+  render(
+    rect: Rect,
+    scale: number,
+    priority: TilePriority,
+    signal?: AbortSignal,
+  ): Promise<ImageBitmap> {
     if (this.dead) return Promise.reject(new Error('Compositor worker is gone'));
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.post({ t: 'tile', id, rect });
+      this.post({ t: 'tile', id, rect, scale, priority });
+      signal?.addEventListener(
+        'abort',
+        () => {
+          // Let the worker skip it; the answer (an AbortError or a late bitmap) is handled above.
+          if (this.pending.has(id) && !this.dead) this.post({ t: 'cancel', id });
+        },
+        { once: true },
+      );
     });
   }
 

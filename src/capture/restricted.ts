@@ -9,11 +9,22 @@ export type RestrictedKind =
   | 'pdf'
   | 'file-no-access'
   | 'extension-page'
+  /** Page Snap's own editor or options page. */
+  | 'own-page'
   | 'data-url'
   | 'unknown';
 
-export function classifyRestrictedUrl(url: string | undefined, fileAccess = true): RestrictedKind {
+/**
+ * `ownOrigin` is `browser.runtime.getURL('/')` (`chrome-extension://<id>/`): our own pages get
+ * their own wording, not "other extensions".
+ */
+export function classifyRestrictedUrl(
+  url: string | undefined,
+  fileAccess = true,
+  ownOrigin?: string,
+): RestrictedKind {
   if (!url) return 'unknown';
+  if (ownOrigin && url.startsWith(ownOrigin)) return 'own-page';
   let u: URL;
   try {
     u = new URL(url);
@@ -38,7 +49,8 @@ export function classifyRestrictedUrl(url: string | undefined, fileAccess = true
 }
 
 /** Fallback when the URL is hidden from us: Chrome's `executeScript` error text. */
-export function classifyInjectError(message: string): RestrictedKind {
+export function classifyInjectError(message: string, ownOrigin?: string): RestrictedKind {
+  if (ownOrigin && message.includes(ownOrigin)) return 'own-page';
   if (/chrome(-untrusted)?:\/\/|devtools:\/\/|about:|view-source:/i.test(message))
     return 'browser-page';
   if (/extensions gallery|webstore/i.test(message)) return 'web-store';
@@ -54,12 +66,17 @@ const NAMES: Record<RestrictedKind, string> = {
   pdf: 'Chrome’s PDF viewer can’t be scrolled by extensions',
   'file-no-access': 'Page Snap isn’t allowed to read local files',
   'extension-page': 'Pages of other extensions can’t be scrolled',
+  'own-page': 'This is Page Snap’s own page',
   'data-url': 'This kind of page (data: URL) can’t be scrolled by extensions',
   unknown: 'This page can’t be scrolled by extensions',
 };
 
 /** Message for a successful visible-area fallback (`VISIBLE_ONLY` warning). */
 export function visibleOnlyMessage(kind: RestrictedKind): string {
+  if (kind === 'own-page') {
+    const mac = /Mac|iPhone|iPad/i.test(globalThis.navigator?.platform ?? '');
+    return `This is Page Snap’s own page, so only the visible area was captured. To copy a marked-up capture, press ${mac ? '⌘C' : 'Ctrl+C'} in its editor.`;
+  }
   return `${NAMES[kind]}, so only the visible area was captured.`;
 }
 

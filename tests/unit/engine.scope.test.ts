@@ -46,6 +46,8 @@ function plan(o: Partial<CopyPlanInput> & Pick<CopyPlanInput, 'image' | 'dpr'>):
     view: { x: 0, y: 0, w: o.image.w, h: Math.min(o.image.h, 1600) },
     fullMaxCssHeight: AI_MAX_LONG_EDGE_CSS,
     resolution: 'css',
+    // The v0.1 crop is the `tight` mode now; `fill` (the default) has its own tests below.
+    scope: 'tight',
     ...o,
   });
 }
@@ -161,7 +163,7 @@ describe('planCopy: full', () => {
 
 // ------------------------------------------------------------------------------- smart
 
-describe('planCopy: smart (tall page with shapes)', () => {
+describe('planCopy: tight (tall page with shapes)', () => {
   it('pads the bbox by 160 CSS × dpr at full width', () => {
     // Bounds 19995..20205 (h 210): 10% is 21, so the 320 image-px pad wins.
     const p = plan({ image: TALL, dpr: 2, shapes: [rect({ x: 200, y: 20000, w: 400, h: 200 })] });
@@ -294,57 +296,140 @@ describe('planCopy: smart (tall page with shapes)', () => {
   });
 });
 
-// ------------------------------------------------------------------------------- viewport
+// ------------------------------------------------------------------------------- from here
 
-describe('planCopy: viewport (tall page, no shapes)', () => {
-  it('copies the view at full width', () => {
+describe('planCopy: from here down (tall page, no shapes)', () => {
+  it('copies from the top of the view down to the budget, at full width', () => {
     const view = { x: 400, y: 20000, w: 1000, h: 1600 };
-    const p = plan({ image: TALL, dpr: 2, view });
-    expect(p.outcome).toBe('viewport');
-    expect(p.region).toEqual({ x: 0, y: 20000, w: 2800, h: 1600 });
-    expect(p.tall).toBe(false);
-    expect(p.size).toEqual({ w: 1400, h: 800 });
+    for (const scope of ['fill', 'tight'] as const) {
+      const p = plan({ image: TALL, dpr: 2, view, scope });
+      expect(p.outcome).toBe('viewport');
+      expect(p.kind).toBe('fromHere');
+      expect(p.region).toEqual({ x: 0, y: 20000, w: 2800, h: CAP2 });
+      expect(p.tall).toBe(false);
+      expect(p.size).toEqual({ w: 1400, h: AI_MAX_LONG_EDGE_CSS });
+    }
   });
 
-  it('rounds a fractional view out to whole px', () => {
+  it('starts at a whole px', () => {
     const p = plan({ image: TALL, dpr: 2, view: { x: 0, y: 20000.4, w: 2800, h: 1600 } });
     expect(p.region.y).toBe(20000);
-    expect(p.region.y + p.region.h).toBeGreaterThanOrEqual(21600.4);
     expectSaneRegion(p, TALL);
   });
 
-  it('caps a zoomed-out view at 2576 CSS × dpr, centred', () => {
-    const p = plan({ image: TALL, dpr: 2, view: { x: 0, y: 10000, w: 2800, h: 20000 } });
-    expect(p.outcome).toBe('viewport');
-    expect(p.region).toEqual({ x: 0, y: 20000 - CAP2 / 2, w: 2800, h: CAP2 });
-  });
-
-  it('clamps a view that hangs over the top or bottom edge', () => {
+  it('a view above the top starts at 0; near the bottom it shifts up to stay budget-tall', () => {
     const top = plan({ image: TALL, dpr: 2, view: { x: 0, y: -48, w: 2800, h: 1600 } });
-    expect(top.region).toEqual({ x: 0, y: 0, w: 2800, h: 1552 });
+    expect(top.region).toEqual({ x: 0, y: 0, w: 2800, h: CAP2 });
     const bottom = plan({ image: TALL, dpr: 2, view: { x: 0, y: 59000, w: 2800, h: 1600 } });
-    expect(bottom.region).toEqual({ x: 0, y: 59000, w: 2800, h: 1000 });
+    expect(bottom.region).toEqual({ x: 0, y: 60000 - CAP2, w: 2800, h: CAP2 });
   });
 
-  it('falls back to the top of the page for a view entirely outside the image', () => {
-    const p = plan({ image: TALL, dpr: 2, view: { x: 0, y: 70000, w: 2800, h: 1600 } });
-    expect(p.outcome).toBe('viewport');
-    expect(p.region).toEqual({ x: 0, y: 0, w: 2800, h: CAP2 });
+  it('treats marks dragged wholly off the image as no marks (never a 1-px copy)', () => {
+    for (const box of [
+      { x: 0, y: -900, w: 100, h: 200 },
+      { x: 0, y: 61000, w: 100, h: 200 },
+      { x: 3200, y: 5000, w: 100, h: 200 },
+    ]) {
+      const p = plan({
+        image: TALL,
+        dpr: 2,
+        shapes: [rect(box)],
+        view: { x: 0, y: 1000, w: 2800, h: 1600 },
+      });
+      expect(p.kind).toBe('fromHere');
+      expect(p.region.h).toBe(CAP2);
+      expectSaneRegion(p, TALL);
+    }
   });
 
   it('works on a 1280×70000 page and at dpr 1', () => {
     const p = plan({ image: HUGE, dpr: 2, view: { x: 0, y: 100000, w: 2560, h: 1626 } });
-    expect(p.region).toEqual({ x: 0, y: 100000, w: 2560, h: 1626 });
+    expect(p.region).toEqual({ x: 0, y: 100000, w: 2560, h: CAP2 });
     expect(p.scale).toBe(0.5);
-    expect(p.size).toEqual({ w: 1280, h: 813 });
+    expect(p.size).toEqual({ w: 1280, h: AI_MAX_LONG_EDGE_CSS });
 
     const d1 = plan({
       image: page(1280, 30000, 1),
       dpr: 1,
       view: { x: 0, y: 500, w: 1280, h: 813 },
     });
-    expect(d1.region).toEqual({ x: 0, y: 500, w: 1280, h: 813 });
+    expect(d1.region).toEqual({ x: 0, y: 500, w: 1280, h: AI_MAX_LONG_EDGE_CSS });
     expect(d1.scale).toBe(1);
+  });
+
+  it('may snap both edges by up to 48 CSS px', () => {
+    const p = plan({ image: TALL, dpr: 2, view: { x: 0, y: 20000, w: 2800, h: 1600 } });
+    expect(p.snap).toEqual({ top: 96, bottom: 96 });
+    const top = plan({ image: TALL, dpr: 2, view: { x: 0, y: 0, w: 2800, h: 1600 } });
+    expect(top.snap).toEqual({ top: 0, bottom: 96 });
+  });
+});
+
+// ------------------------------------------------------------------------------- fill
+
+describe('planCopy: fill (design §5, the default)', () => {
+  const fill = (o: Partial<CopyPlanInput>) =>
+    plan({ image: page(1440, 4348, 2), dpr: 2, scope: 'fill', ...o });
+  const LMS = page(1440, 4348, 2); // 2880 × 8696
+
+  it('takes the page from the top when the marks plus padding fit in the budget', () => {
+    // Marks at CSS 260..420 → bounds 515..845 image px; + 320 pad = 1165 ≤ 5152.
+    const p = fill({ shapes: [rect({ x: 100, y: 520, w: 400, h: 320 })] });
+    expect(p.outcome).toBe('smart');
+    expect(p.kind).toBe('fromTop');
+    expect(p.region).toEqual({ x: 0, y: 0, w: 2880, h: CAP2 });
+    expect(p.size).toEqual({ w: 1440, h: AI_MAX_LONG_EDGE_CSS });
+    expect(p.tall).toBe(false);
+    // Only the bottom edge may snap (the top is the page top), never into the marks.
+    expect(p.snap).toEqual({ top: 0, bottom: 96 });
+    expectSaneRegion(p, LMS);
+  });
+
+  it('otherwise a budget-tall window with 55% of the spare room above the marks', () => {
+    // Bounds 6995..7305 (h 310), pad 320 → need 950; spare 4202 → 2311 above.
+    const p = fill({ shapes: [rect({ x: 0, y: 7000, w: 100, h: 300 })] });
+    expect(p.kind).toBe('aroundMarks');
+    const top = 6995 - 320 - Math.round(0.55 * (CAP2 - 950));
+    // That would end past the page (8696), so it shifts up to stay budget-tall.
+    expect(top + CAP2).toBeGreaterThan(8696);
+    expect(p.region).toEqual({ x: 0, y: 8696 - CAP2, w: 2880, h: CAP2 });
+
+    const mid = plan({
+      image: TALL,
+      dpr: 2,
+      scope: 'fill',
+      shapes: [rect({ x: 0, y: 30000, w: 100, h: 300 })],
+    });
+    const want = 29995 - 320 - Math.round(0.55 * (CAP2 - 950));
+    expect(mid.region).toEqual({ x: 0, y: want, w: 2800, h: CAP2 });
+    expect(mid.kind).toBe('aroundMarks');
+    // Both edges may snap by 48 CSS px; the marks are far from both.
+    expect(mid.snap).toEqual({ top: 96, bottom: 96 });
+    expectSaneRegion(mid, TALL);
+  });
+
+  it('marks taller than the budget: just the marks, tall, no snapping', () => {
+    const p = fill({
+      image: TALL,
+      shapes: [rect({ x: 0, y: 1000, w: 100, h: 100 }), rect({ x: 0, y: 9000, w: 100, h: 100 })],
+    });
+    expect(p.tall).toBe(true);
+    expect(p.kind).toBe('aroundMarks');
+    expect(p.region).toEqual({ x: 0, y: 995, w: 2800, h: 9105 - 995 });
+    expect(p.snap).toBeUndefined();
+  });
+
+  it('clamps marks partly off the image before planning', () => {
+    const p = fill({ image: TALL, shapes: [rect({ x: 0, y: -400, w: 100, h: 500 })] });
+    expect(p.kind).toBe('fromTop');
+    expect(p.region).toEqual({ x: 0, y: 0, w: 2800, h: CAP2 });
+  });
+
+  it('a short page is still copied whole', () => {
+    const p = fill({ image: SHORT, shapes: [rect({ x: 0, y: 100, w: 100, h: 100 })] });
+    expect(p.kind).toBe('full');
+    expect(p.region).toEqual({ x: 0, y: 0, w: 2560, h: 4000 });
+    expect(p.snap).toBeUndefined();
   });
 });
 
@@ -479,7 +564,7 @@ describe('regression: capped region can exceed the cap by 1 px', () => {
     expect(p.region.h).toBeLessThanOrEqual(CAP2);
   });
 
-  it('capped viewport region is at most 2576 × dpr tall', () => {
+  it('capped from-here region is at most 2576 × dpr tall', () => {
     const p = plan({ image: TALL, dpr: 2, view: { x: 0, y: 10000.5, w: 2800, h: 20000 } });
     expect(p.region.h).toBeLessThanOrEqual(CAP2);
   });

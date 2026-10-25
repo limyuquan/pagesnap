@@ -19,6 +19,10 @@ export type ExportRequest =
   | { t: 'priority'; id: number; priority: ExportPriority };
 
 export type ExportResponse =
+  /** Posted once by the worker when its script has loaded (never by the main-thread runner). */
+  | { t: 'ready' }
+  /** A job left the queue and is running now (its timeout counts from here). */
+  | { t: 'start'; id: number }
   | { t: 'done'; id: number; result: ExportResult }
   | { t: 'error'; id: number; name: string; message: string };
 
@@ -91,6 +95,7 @@ export function createExportRunner(
     if (!next) return;
     const ac = new AbortController();
     running = { id: next.id, ac };
+    post({ t: 'start', id: next.id });
     void run(next, ac.signal).finally(() => {
       running = null;
       pump();

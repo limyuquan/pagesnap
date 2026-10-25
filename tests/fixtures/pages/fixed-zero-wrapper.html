@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: fixed zero-height wrapper</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  w3schools-style top nav (qa-sitesB I-1): `#top-nav-bar` is `position: fixed` with a 0 px tall
+  box; the visible nav is its `position: absolute` child `#pagetop` (56 px, #282a35, "TOP NAV").
+  The nav must appear exactly once, at the top, and never cover content in later slices.
+  Decoys inside the wrapper that must not count towards its visible extent:
+  - `#menu`: `height: 0; overflow: hidden` dropdown with a 900 px child (would make it a shell);
+  - `#skip`: off-screen skip link (`left: -9999px`, 600 px tall);
+  - `#search`: a `display: none` 700 px panel.
+  Body: 56 px top padding, then 12 x 500 px bands (bands.html colours, 2 px black top rule).
+-->
+<style>
+  html, body { margin: 0; padding: 0; }
+  body { font: 16px/1.5 system-ui, sans-serif; color: #111; background: #fff; padding-top: 56px; }
+  #top-nav-bar { position: fixed; top: 0; left: 0; right: 0; z-index: 20; }
+  #pagetop { position: absolute; top: 0; left: 0; right: 0; height: 56px; background: #282a35; color: #fff; display: flex; align-items: center; padding: 0 24px; font-weight: 700; box-sizing: border-box; }
+  #menu { position: absolute; top: 56px; left: 0; right: 0; height: 0; overflow: hidden; }
+  #menu > div { height: 900px; background: #ff00aa; }
+  #skip { position: absolute; left: -9999px; top: 0; width: 300px; height: 600px; background: #ff00aa; }
+  #search { position: absolute; top: 56px; left: 0; right: 0; height: 700px; background: #ff00aa; display: none; }
+  .band { height: 500px; box-sizing: border-box; border-top: 2px solid #000; padding: 16px 24px; font-weight: 600; font-size: 24px; }
+</style>
+</head>
+<body>
+<div id="top-nav-bar">
+  <div id="pagetop">TOP NAV</div>
+  <div id="menu"><div>MENU</div></div>
+  <a id="skip" href="#content">Skip to content</a>
+  <div id="search">SEARCH</div>
+</div>
+<div id="content"></div>
+<script>
+  const colors = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c'];
+  const content = document.getElementById('content');
+  for (let i = 0; i < 12; i++) {
+    const band = document.createElement('div');
+    band.className = 'band';
+    band.style.background = colors[i % 8];
+    band.textContent = `Band ${i}`;
+    content.append(band);
+  }
+  window.__fixture = {
+    name: 'fixed-zero-wrapper',
+    cssHeight: 6056,
+    nav: { height: 56, color: '#282a35' },
+    decoyColor: '#ff00aa',
+    bands: { top: 56, height: 500, count: 12 },
+    colors,
+  };
+</script>
+</body>
+</html>

@@ -124,12 +124,24 @@ export function chooseScrollTarget<T>(
 // ---------------------------------------------------------------------------------------------
 // Floating (fixed) elements (01 §3.1)
 
-export type FloatKind = 'shell' | 'top' | 'bottom' | 'skip';
+export type FloatKind = 'shell' | 'side' | 'top' | 'bottom' | 'skip';
+
+/** A `side` float spans at least this share of the scroll area's height... */
+export const SIDE_MIN_HEIGHT = 0.6;
+/** ...reaches the area's bottom edge within this many CSS px... */
+export const SIDE_BOTTOM_TOLERANCE = 8;
+/** ...and is at most this share of the viewport wide. */
+export const SIDE_MAX_WIDTH = 0.4;
 
 /**
- * Classify a `position: fixed` element by its viewport rect.
+ * Classify a `position: fixed` element by its visible extent in the viewport (the union of its own
+ * box and its visible descendants' boxes, see `visibleExtent` in `agent/dom.ts`).
  * - `skip`: invisible, or (for inner scrollers) not overlapping the scroller, so it can't repeat.
  * - `shell`: covers ≥ 50% of the viewport or contains the scroll target. Kept in every slice.
+ * - `side`: a sidebar or rail docked beside the content: ≥ `SIDE_MIN_HEIGHT` of the scroll area
+ *   tall, reaching its bottom edge (within `SIDE_BOTTOM_TOLERANCE`), at most `SIDE_MAX_WIDTH` of
+ *   the viewport wide, and entirely on one side of the scroll area's vertical centre line. Kept in
+ *   every slice, in place, so it runs down the side of the stitched image.
  * - `top` / `bottom`: by vertical centre relative to the scroll area. `top` floats are only shown
  *   in the first slice, `bottom` ones only in the last.
  */
@@ -147,26 +159,45 @@ export function classifyFloat(
   if (vx1 <= vx0 || vy1 <= vy0) return 'skip';
   if (opts.containsTarget) return 'shell';
   if ((vx1 - vx0) * (vy1 - vy0) >= 0.5 * view.w * view.h) return 'shell';
+  const ax1 = scrollArea.x + scrollArea.w;
+  const ay1 = scrollArea.y + scrollArea.h;
   if (opts.elementTarget) {
-    const overlaps =
-      vx0 < scrollArea.x + scrollArea.w &&
-      vx1 > scrollArea.x &&
-      vy0 < scrollArea.y + scrollArea.h &&
-      vy1 > scrollArea.y;
+    const overlaps = vx0 < ax1 && vx1 > scrollArea.x && vy0 < ay1 && vy1 > scrollArea.y;
     if (!overlaps) return 'skip';
+  }
+  const areaBottom = Math.min(view.h, ay1);
+  const tallInArea = Math.min(vy1, ay1) - Math.max(vy0, scrollArea.y);
+  const midX = scrollArea.x + scrollArea.w / 2;
+  if (
+    tallInArea >= SIDE_MIN_HEIGHT * scrollArea.h &&
+    vy1 >= areaBottom - SIDE_BOTTOM_TOLERANCE &&
+    vx1 - vx0 <= SIDE_MAX_WIDTH * view.w &&
+    (vx1 <= midX || vx0 >= midX)
+  ) {
+    return 'side';
   }
   const centre = (vy0 + vy1) / 2;
   return centre < scrollArea.y + scrollArea.h / 2 ? 'top' : 'bottom';
 }
 
-/** Which floats are visible in slice `index` (`last` = final slice). */
+/** The floats the agent shows or hides per slice (`shell` and `skip` are never touched). */
+export type SliceFloatKind = 'top' | 'bottom' | 'side';
+
+/**
+ * Which floats are visible in slice `index` (`last` = final slice).
+ * - `keep`: all of them, everywhere.
+ * - `remove`: `top` and `bottom` floats nowhere. `side` floats stay in every slice: like a `shell`
+ *   they are layout (the page reserves their column), never cover content, and removing them would
+ *   leave a blank strip down the image.
+ * - `smart`: `top` in the first slice only, `bottom` in the last only, `side` in every slice.
+ */
 export function floatVisible(
-  kind: 'top' | 'bottom',
+  kind: SliceFloatKind,
   mode: 'smart' | 'remove' | 'keep',
   index: number,
   last: boolean,
 ): boolean {
-  if (mode === 'keep') return true;
+  if (mode === 'keep' || kind === 'side') return true;
   if (mode === 'remove') return false;
   return kind === 'top' ? index === 0 : last;
 }

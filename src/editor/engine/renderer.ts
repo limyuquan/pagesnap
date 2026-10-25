@@ -10,10 +10,10 @@ import type { AnnotationDoc, ShapeId } from '@/shared/annotations';
 import type { Ctx2D } from '@/shared/composite';
 import type { Rect } from '@/shared/types';
 import { drawDoc, type View } from './draw';
-import { imageToScreen, rectsIntersect, shapeBounds, shapeHandles, visibleRect } from './geometry';
+import { imageToScreen, shapeBounds, shapeHandles, visibleRect } from './geometry';
 import { perf } from './perf';
 import { type EditorState, useEditorStore } from './store';
-import { TileCache } from './tiles';
+import { type LevelTile, levelForScale, TileCache } from './tiles';
 
 /** What the controller wants drawn on top of the committed state this frame. */
 export interface Draft {
@@ -32,6 +32,36 @@ const REST_MS = 140;
 const SELECTION_COLOR = '#0A84FF';
 const HANDLE_SIZE_CSS = 8;
 
+/** Copied-region flash (design review §5.5): fade in, hold, fade out. */
+export const FLASH_IN_MS = 120;
+export const FLASH_HOLD_MS = 500;
+export const FLASH_OUT_MS = 420;
+/** With reduced motion: a static outline for this long, no animation. */
+export const FLASH_STATIC_MS = 900;
+const FLASH_DIM = 0.28;
+
+/** `--ps-ease-out`-like curve (cubic-bezier(0.16, 1, 0.3, 1) is close to an exponential out). */
+function easeOut(t: number): number {
+  const x = Math.max(0, Math.min(1, t));
+  return 1 - (1 - x) ** 3;
+}
+
+/** Opacity of the flash `t` ms after it started (0 once it's over). */
+export function flashAlpha(t: number, reducedMotion: boolean): number {
+  if (t < 0) return 0;
+  if (reducedMotion) return t < FLASH_STATIC_MS ? 1 : 0;
+  if (t < FLASH_IN_MS) return easeOut(t / FLASH_IN_MS);
+  if (t < FLASH_IN_MS + FLASH_HOLD_MS) return 1;
+  const u = (t - FLASH_IN_MS - FLASH_HOLD_MS) / FLASH_OUT_MS;
+  return u >= 1 ? 0 : 1 - easeOut(u);
+}
+
+interface Flash {
+  /** Image px. */
+  region: Rect;
+  start: number;
+}
+
 export class Renderer {
   readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
@@ -44,6 +74,9 @@ export class Renderer {
   private restTimer: ReturnType<typeof setTimeout> | null = null;
   private moving = false;
   private backdrop = '#ececee';
+  private flash: Flash | null = null;
+  private flashTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   private unsubscribe: () => void;
   private readonly disposers: (() => void)[] = [];
   private readonly mql: { media: MediaQueryList; listener: () => void }[] = [];
@@ -68,6 +101,14 @@ export class Renderer {
     scheme.addEventListener('change', onScheme);
     this.disposers.push(() => scheme.removeEventListener('change', onScheme));
     document.addEventListener('visibilitychange', this.onVisibility);
+    if (import.meta.env.MODE === 'e2e') {
+      const hook = (window as unknown as { __pagesnapEngine?: Record<string, unknown> })
+        .__pagesnapEngine;
+      if (hook) {
+        hook.tiles = () => this.tiles?.stats ?? null;
+        hook.flash = () => this.flashState;
+      }
+    }
 
     let prev = useEditorStore.getState();
     this.unsubscribe = useEditorStore.subscribe((s) => {
@@ -77,6 +118,7 @@ export class Renderer {
         this.lastCamAt = performance.now();
         this.moving = true;
       }
+      if (s.copy !== p.copy && s.copy.state === 'copied') this.startFlash(s);
       if (
         s.doc !== p.doc ||
         s.camera !== p.camera ||
@@ -114,6 +156,29 @@ export class Renderer {
 
   get tileCache(): TileCache | null {
     return this.tiles;
+  }
+
+  /** Flash the region a copy just put on the clipboard (image px). */
+  startFlash(s: EditorState): void {
+    if (s.copy.state !== 'copied' || !s.session) return;
+    const region = s.copy.scope?.region ?? {
+      x: 0,
+      y: 0,
+      w: s.session.image.w,
+      h: s.session.image.h,
+    };
+    this.flash = { region, start: performance.now() };
+    this.invalidate();
+  }
+
+  /** Flash state for tests: the region and its opacity right now (null when none). */
+  get flashState(): { region: Rect; alpha: number } | null {
+    const f = this.flash;
+    if (!f) return null;
+    return {
+      region: f.region,
+      alpha: flashAlpha(performance.now() - f.start, this.reducedMotion.matches),
+    };
   }
 
   private watchDpr(): void {
@@ -170,9 +235,10 @@ export class Renderer {
     const draft = this.draftProvider?.() ?? null;
     const drawn = draft?.doc ?? doc;
 
+    const level = tiles ? levelForScale(scale, tiles.maxLevel) : 0;
     if (tiles) {
       const prefetch = { x: visible.x, y: visible.y - visible.h, w: visible.w, h: visible.h * 3 };
-      tiles.update(visible, prefetch);
+      tiles.update(visible, prefetch, level);
     }
 
     const resting = performance.now() - this.lastCamAt >= REST_MS;
@@ -181,11 +247,13 @@ export class Renderer {
     if (s.editingTextId) hidden.add(s.editingTextId);
 
     drawDoc(ctx, drawn, view, {
-      drawBase: (c) => this.drawBase(c, view, visible, session.layout.background, !this.moving),
+      drawBase: (c) =>
+        this.drawBase(c, view, visible, level, session.layout.background, !this.moving),
       hidden,
       cull: visible,
     });
     this.drawOverlay(drawn, draft?.selection ?? s.selection, draft?.marquee ?? null, s);
+    this.drawFlash(s);
 
     if (s.load.phase === 'loading' && tiles?.covers(visible)) s._engine._firstPaint();
     if (this.moving) this.scheduleRest();
@@ -200,8 +268,18 @@ export class Renderer {
     }, REST_MS);
   }
 
-  /** Visible tiles at full resolution; placeholders where a tile hasn't decoded yet. */
-  private drawBase(ctx: Ctx2D, view: View, visible: Rect, background: string, hq: boolean): void {
+  /**
+   * Visible tiles of `level`. Where one hasn't loaded yet, whatever else is resident is drawn in
+   * its place (coarser levels first, then finer ones), over a neutral placeholder.
+   */
+  private drawBase(
+    ctx: Ctx2D,
+    view: View,
+    visible: Rect,
+    level: number,
+    background: string,
+    hq: boolean,
+  ): void {
     const tiles = this.tiles;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     const s = view.scale;
@@ -211,21 +289,105 @@ export class Renderer {
     ctx.imageSmoothingEnabled = s < 2;
     ctx.imageSmoothingQuality = hq ? 'high' : 'low';
     if (!tiles) return;
-    for (const t of tiles.tiles) {
-      if (!rectsIntersect(t.rect, visible)) continue;
+    const box = (t: LevelTile) => {
       const x0 = ox(t.rect.x);
       const y0 = oy(t.rect.y);
-      const w = ox(t.rect.x + t.rect.w) - x0;
-      const h = oy(t.rect.y + t.rect.h) - y0;
-      const bmp = tiles.get(t.index);
-      if (bmp) {
-        ctx.drawImage(bmp, x0, y0, w, h);
-      } else {
-        ctx.fillStyle = background;
-        ctx.fillRect(x0, y0, w, h);
-        ctx.fillStyle = 'rgba(0,0,0,0.04)';
-        ctx.fillRect(x0, y0, w, h);
+      return { x: x0, y: y0, w: ox(t.rect.x + t.rect.w) - x0, h: oy(t.rect.y + t.rect.h) - y0 };
+    };
+    const missing: LevelTile[] = [];
+    for (const t of tiles.tilesIn(level, visible)) {
+      const bmp = tiles.get(t);
+      if (!bmp) {
+        missing.push(t);
+        continue;
       }
+      const b = box(t);
+      ctx.drawImage(bmp, b.x, b.y, b.w, b.h);
+    }
+    if (missing.length === 0) return;
+    ctx.save();
+    const clip = new Path2D();
+    let union: Rect | null = null;
+    for (const t of missing) {
+      const b = box(t);
+      clip.rect(b.x, b.y, b.w, b.h);
+      union = union
+        ? {
+            x: Math.min(union.x, t.rect.x),
+            y: Math.min(union.y, t.rect.y),
+            w: Math.max(union.x + union.w, t.rect.x + t.rect.w) - Math.min(union.x, t.rect.x),
+            h: Math.max(union.y + union.h, t.rect.y + t.rect.h) - Math.min(union.y, t.rect.y),
+          }
+        : { ...t.rect };
+    }
+    ctx.clip(clip);
+    ctx.fillStyle = background;
+    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.fillStyle = 'rgba(0,0,0,0.04)';
+    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    if (union) {
+      const area = intersectRect(union, visible);
+      if (area) {
+        for (const f of tiles.fallbacks(area, level)) {
+          const b = box(f.tile);
+          ctx.drawImage(f.bitmap, b.x, b.y, b.w, b.h);
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  /** The copied-region flash: dim outside, white outline with a dark hairline ring. */
+  private drawFlash(s: EditorState): void {
+    const f = this.flash;
+    if (!f) return;
+    const reduced = this.reducedMotion.matches;
+    const t = performance.now() - f.start;
+    const a = flashAlpha(t, reduced);
+    if (a <= 0) {
+      this.flash = null;
+      return;
+    }
+    const ctx = this.ctx;
+    const D = this.dpr;
+    const cam = s.camera;
+    const p0 = imageToScreen(cam, { x: f.region.x, y: f.region.y });
+    const p1 = imageToScreen(cam, { x: f.region.x + f.region.w, y: f.region.y + f.region.h });
+    const x = Math.round(p0.x * D) / D;
+    const y = Math.round(p0.y * D) / D;
+    const w = Math.round(p1.x * D) / D - x;
+    const h = Math.round(p1.y * D) / D - y;
+    ctx.save();
+    ctx.setTransform(D, 0, 0, D, 0, 0);
+    ctx.globalAlpha = a;
+    if (!reduced) {
+      const vw = this.canvas.width / D;
+      const vh = this.canvas.height / D;
+      const dim = new Path2D();
+      dim.rect(0, 0, vw, vh);
+      dim.rect(x, y, w, h);
+      ctx.fillStyle = `rgba(0,0,0,${FLASH_DIM})`;
+      ctx.fill(dim, 'evenodd');
+    }
+    // 2 px white just outside the region, then a 1 px dark ring outside that.
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.strokeRect(x - 1, y - 1, w + 2, h + 2);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+    ctx.strokeRect(x - 2.5, y - 2.5, w + 5, h + 5);
+    ctx.restore();
+    if (!reduced) {
+      this.invalidate();
+    } else if (!this.flashTimer) {
+      // Static: one frame to show it, one to take it away.
+      this.flashTimer = setTimeout(
+        () => {
+          this.flashTimer = null;
+          this.invalidate();
+        },
+        Math.max(0, FLASH_STATIC_MS - t) + 5,
+      );
     }
   }
 
@@ -247,7 +409,9 @@ export class Renderer {
     const sel = new Set(selection);
     const shapes = doc.shapes.filter((sh) => sel.has(sh.id) && sh.id !== s.editingTextId);
     for (const sh of shapes) {
-      const b = shapeBounds(sh, dpr);
+      // Rects: on the stroke centre, where the handles are (design §3); others: their bounds.
+      const b = sh.kind === 'rect' ? sh.box : shapeBounds(sh, dpr);
+      const out = sh.kind === 'rect' ? 0 : 3;
       const p0 = imageToScreen(cam, { x: b.x, y: b.y });
       const p1 = imageToScreen(cam, { x: b.x + b.w, y: b.y + b.h });
       const lineLike = sh.kind === 'arrow' || sh.kind === 'underline' || sh.kind === 'highlight';
@@ -255,10 +419,10 @@ export class Renderer {
         ctx.setLineDash([4, 3]);
         ctx.strokeStyle = SELECTION_COLOR;
         ctx.strokeRect(
-          Math.round(p0.x - 3) + 0.5,
-          Math.round(p0.y - 3) + 0.5,
-          Math.round(p1.x - p0.x + 6),
-          Math.round(p1.y - p0.y + 6),
+          Math.round(p0.x - out) + 0.5,
+          Math.round(p0.y - out) + 0.5,
+          Math.round(p1.x - p0.x + 2 * out),
+          Math.round(p1.y - p0.y + 2 * out),
         );
         ctx.setLineDash([]);
       }
@@ -278,6 +442,10 @@ export class Renderer {
               HANDLE_SIZE_CSS,
               HANDLE_SIZE_CSS,
             );
+          // A faint dark ring first, so white handles still read on a red stroke.
+          ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+          ctx.lineWidth = 3.5;
+          ctx.stroke();
           ctx.fillStyle = '#FFFFFF';
           ctx.fill();
           ctx.strokeStyle = SELECTION_COLOR;
@@ -318,6 +486,7 @@ export class Renderer {
   dispose(): void {
     if (this.raf) cancelAnimationFrame(this.raf);
     if (this.restTimer) clearTimeout(this.restTimer);
+    if (this.flashTimer) clearTimeout(this.flashTimer);
     this.unsubscribe();
     for (const m of this.mql) m.media.removeEventListener('change', m.listener);
     document.removeEventListener('visibilitychange', this.onVisibility);
@@ -325,4 +494,12 @@ export class Renderer {
     this.tiles?.dispose();
     this.tiles = null;
   }
+}
+
+function intersectRect(a: Rect, b: Rect): Rect | null {
+  const x = Math.max(a.x, b.x);
+  const y = Math.max(a.y, b.y);
+  const r = Math.min(a.x + a.w, b.x + b.w);
+  const btm = Math.min(a.y + a.h, b.y + b.h);
+  return r > x && btm > y ? { x, y, w: r - x, h: btm - y } : null;
 }

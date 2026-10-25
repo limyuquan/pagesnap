@@ -36,6 +36,11 @@ export default defineConfig({
       'Full-page screenshots with an instant annotation editor. Copy the marked-up image straight into an AI chat.',
     minimum_chrome_version: '120',
     permissions: ['activeTab', 'scripting', 'storage', 'unlimitedStorage', 'contextMenus'],
+    // Incognito (when the user allows it) runs in its own process with its own storage. Incognito
+    // captures land in the incognito profile's in-memory IndexedDB, never on disk, are gone when
+    // the last incognito window closes, and the editor opens inside the incognito window. The
+    // default ('spanning') would write them into the regular profile's database.
+    incognito: 'split',
     // e2e only: captureVisibleTab needs `<all_urls>` or an activeTab grant; a localhost-only host
     // permission is not enough (verified), and Playwright can't produce the activeTab gesture.
     ...(mode === 'e2e' && { host_permissions: ['<all_urls>'] }),

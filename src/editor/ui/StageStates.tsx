@@ -4,7 +4,7 @@
  */
 import { useEffect, useState } from 'react';
 import { browser } from 'wxt/browser';
-import { CloseIcon, InfoIcon, NoticeIcon } from './icons';
+import { CloseIcon, NoticeIcon } from './icons';
 import { prettyCommandShortcut } from './keys';
 import { captureNotice, errorContent } from './messages';
 import type { SessionMeta } from './useSessionMeta';
@@ -14,13 +14,36 @@ import type { ViewPhase } from './viewPhase';
 
 export function LoadingState({
   phase,
+  stalled = false,
 }: {
   phase: Extract<ViewPhase, { kind: 'waiting' | 'loading' }>;
+  /** The capture stopped sending updates (see stuck.ts). */
+  stalled?: boolean;
 }) {
   const waiting = phase.kind === 'waiting';
   const { done, total } = waiting ? phase.progress : { done: 0, total: 0 };
   const determinate = waiting && total > 0;
   const p = determinate ? Math.min(1, done / total) : 0;
+  const shortcut = useCaptureShortcut();
+  if (waiting && stalled) {
+    return (
+      <div className="ps-center" data-testid="state-loading" data-phase="stalled">
+        <div className="ps-loading" role="status" aria-live="polite">
+          <b>The capture stopped responding</b>
+          <span className="tnum">
+            {determinate ? `Stuck at ${done} of ${total}` : 'No progress'}
+          </span>
+          <div className="ps-progress" data-stalled="" style={{ '--p': p } as React.CSSProperties}>
+            <i />
+          </div>
+          <p className="ps-loading-hint">
+            Page Snap will save what it has in a moment. To start over, go back to the page and{' '}
+            <RetryHow shortcut={shortcut} />
+          </p>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="ps-center" data-testid="state-loading" data-phase={phase.kind}>
       <div className="ps-loading" role="status" aria-live="polite">
@@ -40,6 +63,17 @@ export function LoadingState({
         </div>
       </div>
     </div>
+  );
+}
+
+/** "press ⌥⇧P." or "click Page Snap in the toolbar." */
+function RetryHow({ shortcut }: { shortcut: string }) {
+  return shortcut ? (
+    <>
+      press <kbd>{prettyCommandShortcut(shortcut)}</kbd>.
+    </>
+  ) : (
+    <>click Page Snap in the toolbar.</>
   );
 }
 
@@ -72,22 +106,28 @@ export function ErrorState({
 }) {
   const c = errorContent(phase);
   const shortcut = useCaptureShortcut();
-  const canReopen = !!meta && /^https?:/.test(meta.url);
+  const canReopen = c.retry === 'capture' && !!meta && /^https?:/.test(meta.url);
   return (
     <div className="ps-center" data-testid="state-error" data-code={c.code}>
       <section className="ps-error" role="alert" aria-labelledby="ps-error-title">
         <h1 id="ps-error-title">{c.title}</h1>
         <p>{c.body}</p>
-        <p className="ps-error-hint">
-          To try again, go back to the page and{' '}
-          {shortcut ? (
-            <>
-              press <kbd>{prettyCommandShortcut(shortcut)}</kbd>.
-            </>
-          ) : (
-            'click Page Snap in the toolbar.'
-          )}
-        </p>
+        {c.retry === 'reload' ? (
+          <p className="ps-error-hint">The capture itself is still saved on this device.</p>
+        ) : (
+          <p className="ps-error-hint">
+            To try again, go back to the page and <RetryHow shortcut={shortcut} />
+          </p>
+        )}
+        {c.retry === 'reload' && (
+          <button
+            type="button"
+            className="ps-error-action"
+            onClick={() => window.location.reload()}
+          >
+            Reload this tab
+          </button>
+        )}
         {canReopen && meta && (
           <a className="ps-error-action" href={meta.url} target="_blank" rel="noreferrer">
             Open the page
@@ -100,45 +140,15 @@ export function ErrorState({
 
 // ---------------------------------------------------------------- notice
 
-const SEEN_INFO_KEY = 'pagesnap:seen-info';
-
-function readSeenInfo(): Set<string> {
-  try {
-    const v = JSON.parse(localStorage.getItem(SEEN_INFO_KEY) ?? '[]');
-    return new Set(Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function markInfoSeen(code: string): void {
-  try {
-    const seen = readSeenInfo();
-    if (seen.has(code)) return;
-    seen.add(code);
-    localStorage.setItem(SEEN_INFO_KEY, JSON.stringify([...seen]));
-  } catch {
-    // Storage unavailable: the info line just shows again next time.
-  }
-}
-
 /**
- * The quiet strip under the top bar. Warnings (partial, visible-only, cut off, page changed) use
- * the warning icon and show on every capture that has them. Informational lines (a scrolling
- * panel was expanded in place) use a neutral icon and show once per profile: the capture is
- * fine, the user only needs to hear how it works the first time.
+ * The quiet strip under the top bar, for warnings only (partial, visible-only, cut off, page
+ * changed, couldn't scroll). Informational facts (a scrolling panel captured as the page) go in
+ * the page title's tooltip, not here: they'd sit over every first capture of a Canvas page.
  */
 export function CaptureNotice({ meta }: { meta: SessionMeta | null | undefined }) {
   const [dismissed, setDismissed] = useState(false);
-  // Read once per editor, so marking an info line as seen doesn't hide it right away.
-  const [seenInfo] = useState(readSeenInfo);
-  const notice = meta && meta.status !== 'capturing' ? captureNotice(meta, seenInfo) : null;
-  const infoCode = notice?.tone === 'info' ? notice.code : null;
-  useEffect(() => {
-    if (infoCode) markInfoSeen(infoCode);
-  }, [infoCode]);
+  const notice = meta && meta.status !== 'capturing' ? captureNotice(meta) : null;
   if (!notice || dismissed) return <div />;
-  const Icon = notice.tone === 'info' ? InfoIcon : NoticeIcon;
   return (
     <div
       className="ps-notice"
@@ -148,7 +158,7 @@ export function CaptureNotice({ meta }: { meta: SessionMeta | null | undefined }
       data-code={notice.code}
       title={notice.all.join('\n')}
     >
-      <Icon className="ps-notice-icon" />
+      <NoticeIcon className="ps-notice-icon" />
       <p className="ps-notice-text m-0">
         {notice.lead && <strong>{notice.lead} </strong>}
         {notice.text}

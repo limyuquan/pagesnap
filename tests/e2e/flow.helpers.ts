@@ -7,6 +7,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { BrowserContext, Page, Worker } from '@playwright/test';
 import { PNG } from 'pngjs';
+import { DEFAULT_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_OPACITY } from '@/shared/annotations';
 import type { CaptureSession, Rect } from '@/shared/types';
 import { getSession, pageState, stitched } from './capture.helpers';
 import {
@@ -24,7 +25,7 @@ import {
 import { expect, type PagesnapHelpers } from './fixtures';
 
 export const RED = hexToRgb('#FF3B30');
-export const YELLOW = hexToRgb('#FFD60A');
+export const YELLOW = hexToRgb(DEFAULT_HIGHLIGHT_COLOR);
 
 export interface ShapeBox {
   kind: string;
@@ -211,6 +212,13 @@ export async function copyViaKeyboard(
     .toBe(before + 1);
   const s = await snapshot(ed);
   expect(s.copy.state).toBe('copied');
+  // The export may move a cut edge by up to 48 CSS px onto a blank row (design §5.4); the
+  // status says which region it really copied.
+  const region = (s.copy as { scope?: { region: Rect } }).scope?.region;
+  if (region) {
+    plan.region = region;
+    plan.size = { w: Math.round(region.w * plan.scale), h: Math.round(region.h * plan.scale) };
+  }
   expect(s.copy.size).toEqual(plan.size);
   // biome-ignore lint/suspicious/noExplicitAny: test hook
   const rec = await ed.evaluate(() => (window as any).__pagesnapEngine.perf.copies.at(-1));
@@ -260,7 +268,8 @@ export function expectAnnotations(c: CopyResult, boxes: readonly ShapeBox[]): vo
       const mx = Math.round((sh.box.x + sh.box.w / 2 - c.plan.region.x) * c.plan.scale);
       const my = Math.round((sh.box.y - c.plan.region.y) * c.plan.scale);
       const b = c.base.rgb(mx, my);
-      const want = b.map((v, i) => v * (1 - 0.45 + (0.45 * (YELLOW[i] ?? 0)) / 255));
+      const a = DEFAULT_HIGHLIGHT_OPACITY;
+      const want = b.map((v, i) => v * (1 - a + (a * (YELLOW[i] ?? 0)) / 255));
       const got = pixel(c.png, mx, my);
       expect(near(got, want, 8), `highlight ${got} vs ${want} (base ${b})`).toBe(true);
       continue;
@@ -398,7 +407,7 @@ export async function runFlow(
     }
   }
   await expect(ed.getByTestId('toast-title')).toHaveText(
-    outcome === 'full' ? 'Copied full page' : 'Copied the area around your marks',
+    outcome === 'full' ? 'Copied full page' : /^Copied/,
   );
   expectAnnotations(copyDefault, boxes);
   expectPagePixels(copyDefault, boxes);

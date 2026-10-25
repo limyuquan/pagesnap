@@ -88,15 +88,18 @@ export function squareFrom(a: Point, p: Point): Point {
 
 // ------------------------------------------------------------------------------- arrow
 
-/** Half-angle of the arrowhead triangle. */
-export const ARROW_HEAD_HALF_ANGLE = (26 * Math.PI) / 180;
+/** Half-angle of the arrowhead triangle (design review §3: 28°). */
+export const ARROW_HEAD_HALF_ANGLE = (28 * Math.PI) / 180;
+/** Arrowhead length in stroke widths, and its minimum in CSS px (design review §3). */
+export const ARROW_HEAD_WIDTHS = 4.5;
+export const ARROW_HEAD_MIN_CSS = 18;
 
 /**
- * Arrowhead length for a stroke `width` (image px) on an image captured at `dpr`: four stroke
+ * Arrowhead length for a stroke `width` (image px) on an image captured at `dpr`: 4.5 stroke
  * widths, at least 18 CSS px, and never more than 60% of the arrow so short arrows stay arrows.
  */
 export function arrowHeadLength(width: number, length: number, dpr: number): number {
-  return Math.min(Math.max(4 * width, 18 * dpr), length * 0.6);
+  return Math.min(Math.max(ARROW_HEAD_WIDTHS * width, ARROW_HEAD_MIN_CSS * dpr), length * 0.6);
 }
 
 export interface ArrowGeometry {
@@ -142,8 +145,8 @@ export function arrowHeads(
 /** Line height as a multiple of the font size. */
 export const TEXT_LINE_HEIGHT = 1.25;
 
-/** White outline width for `outline` text, as a fraction of the font size (4 px at 26 px). */
-export const TEXT_OUTLINE_RATIO = 4 / 26;
+/** White outline width for `outline` text, as a fraction of the font size (3 px at 26 px). */
+export const TEXT_OUTLINE_RATIO = 3 / 26;
 
 export const FONT_STACK =
   'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
