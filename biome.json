@@ -7,7 +7,14 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!**/*.md", "!tests/fixtures/pages", "!public"]
+    "includes": [
+      "**",
+      "!**/*.md",
+      "!tests/fixtures/pages",
+      "!public",
+      "!site/public",
+      "!site/demo-page"
+    ]
   },
   "formatter": {
     "enabled": true,

@@ -1,0 +1,303 @@
+/*
+ * The demo's browser window. Part of the first paint (site.css), so the static stand-in in
+ * index.html and the live demo that replaces it look identical: no shift when the chunk lands.
+ */
+/* ------------------------------------------------------------------ frame */
+
+.dm {
+  --frame-h: clamp(520px, 74svh, 760px);
+  --chrome: #202124;
+  --chrome-2: #2b2c2f;
+  --chrome-ink: #e8eaed;
+  --chrome-ink-2: #9aa0a6;
+  --chrome-line: rgb(255 255 255 / 0.08);
+  position: relative;
+}
+@media (prefers-color-scheme: light) {
+  .dm {
+    --frame-shadow:
+      0 0 0 1px rgb(0 0 0 / 0.12), 0 1px 2px rgb(0 0 0 / 0.06),
+      0 14px 36px -8px rgb(20 20 30 / 0.16);
+    --chrome: #dee1e6;
+    --chrome-2: #ffffff;
+    --chrome-ink: #202124;
+    --chrome-ink-2: #5f6368;
+    --chrome-line: rgb(0 0 0 / 0.1);
+  }
+}
+.dm-frame {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  height: var(--frame-h);
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--chrome);
+  box-shadow: var(--frame-shadow, var(--shadow));
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  isolation: isolate;
+}
+.dm-chrome {
+  background: var(--chrome);
+  user-select: none;
+}
+.dm-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 40px;
+  padding: 0 10px;
+}
+.dm-lights {
+  display: flex;
+  gap: 8px;
+  align-self: center;
+  margin: 0 14px 0 4px;
+}
+.dm-lights i {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ff5f57;
+}
+.dm-lights i:nth-child(2) {
+  background: #febc2e;
+}
+.dm-lights i:nth-child(3) {
+  background: #28c840;
+}
+.dm-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 240px;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9px 9px 0 0;
+  background: transparent;
+  color: var(--chrome-ink-2);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: default;
+}
+.dm-tab span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.dm-tab img {
+  flex: none;
+  border-radius: 3px;
+}
+.dm-tab:hover {
+  background: color-mix(in srgb, var(--chrome-2) 45%, transparent);
+}
+.dm-tab[aria-selected="true"],
+.dm-tab[data-selected] {
+  background: var(--chrome-2);
+  color: var(--chrome-ink);
+}
+.dm-tab:focus-visible {
+  outline-offset: -2px;
+}
+.dm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 10px 0 12px;
+  background: var(--chrome-2);
+  box-shadow: 0 1px 0 var(--chrome-line);
+}
+.dm-omni {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 99px;
+  background: var(--chrome);
+  color: var(--chrome-ink-2);
+  font-size: 13px;
+}
+.dm-url {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.dm-url-host {
+  color: var(--chrome-ink);
+}
+.dm-chip {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 99px;
+  background: var(--chrome-2);
+  color: var(--chrome-ink);
+  font-size: 12px;
+  font-weight: 500;
+}
+/* First-run cue, in the toolbar next to the icon: it never covers the page. */
+.dm-cue {
+  flex: none;
+  color: var(--chrome-ink);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  animation: dm-cue-in 400ms 600ms var(--ease-out) both;
+}
+.dm-cue span {
+  display: inline-block;
+  margin-left: 2px;
+  color: var(--red);
+  animation: dm-nudge 1.6s var(--ease) infinite;
+}
+@keyframes dm-cue-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+}
+@keyframes dm-nudge {
+  50% {
+    transform: translateX(3px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dm-cue,
+  .dm-cue span {
+    animation: none;
+  }
+}
+.dm-ext {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 120ms var(--ease);
+}
+.dm-ext:hover,
+.dm-ext[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--chrome-ink) 12%, transparent);
+}
+.dm-ext img {
+  border-radius: 3px;
+}
+/* The one thing to click first: a slow ring, until the first capture. */
+.dm-ext[data-pulse]::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--red);
+  animation: dm-ring 2.2s var(--ease-out) infinite;
+  pointer-events: none;
+}
+@keyframes dm-ring {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.9);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.45);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dm-ext[data-pulse]::after {
+    animation: none;
+    opacity: 0.9;
+  }
+}
+.dm-badge {
+  position: absolute;
+  right: -3px;
+  bottom: -1px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: #1b1b1d;
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 13px;
+}
+
+/* ------------------------------------------------------------------ view (page / editor) */
+
+.dm-view {
+  position: relative;
+  min-height: 0;
+  background: #fff;
+}
+.dm-page {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.dm-page[hidden] {
+  display: none;
+}
+.dm-page:focus-visible {
+  outline: 2px solid var(--ps-focus, #3d8bff);
+  outline-offset: -2px;
+  border-radius: 0;
+}
+.dm-page {
+  background: #fff no-repeat 0 0 / 100% auto;
+}
+.dm-page img {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+}
+/* ------------------------------------------------------------------ phone frame */
+
+#demo-root {
+  container: demo / inline-size;
+}
+@container demo (max-width: 599px) {
+  .dm-lights {
+    display: none;
+  }
+  .dm-tabs {
+    height: 36px;
+    padding: 0 6px;
+  }
+  .dm-tab {
+    flex: 1 1 0;
+    width: auto;
+    max-width: 220px;
+    padding: 0 10px;
+  }
+  .dm-toolbar {
+    height: 46px;
+    padding: 0 6px 0 8px;
+  }
+  .dm-ext {
+    width: 40px;
+    height: 40px;
+  }
+  .dm-omni {
+    padding: 0 10px;
+  }
+}

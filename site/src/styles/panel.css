@@ -1,0 +1,270 @@
+/*
+ * The capture panel, mirroring the extension's popup (src/entrypoints/popup/style.css): used by
+ * the live demo and by the still-life in the features. Part of the first paint (site.css).
+ */
+
+.pp {
+  --pp-bg: #1b1b1d;
+  --pp-ink: #ededee;
+  --pp-ink-2: rgb(237 237 238 / 0.7);
+  --pp-ink-3: rgb(237 237 238 / 0.5);
+  --pp-ink-4: rgb(237 237 238 / 0.24);
+  --pp-track: rgb(255 255 255 / 0.1);
+  --pp-mini: #26262a;
+  --pp-mini-rim: rgb(255 255 255 / 0.1);
+  --pp-ghost: rgb(255 255 255 / 0.07);
+  --pp-ghost-rim: rgb(255 255 255 / 0.12);
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  column-gap: 16px;
+  width: 320px;
+  height: 136px;
+  padding: 16px;
+  border-radius: 10px;
+  background: var(--pp-bg);
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.08),
+    0 16px 40px -10px rgb(0 0 0 / 0.55);
+  color: var(--pp-ink);
+  font:
+    13px / 1.4 system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  user-select: none;
+}
+@media (prefers-color-scheme: light) {
+  .pp {
+    --pp-bg: #f7f7f8;
+    --pp-ink: #1b1b1d;
+    --pp-ink-2: rgb(27 27 29 / 0.68);
+    --pp-ink-3: rgb(27 27 29 / 0.58);
+    --pp-ink-4: rgb(27 27 29 / 0.3);
+    --pp-track: rgb(0 0 0 / 0.1);
+    --pp-mini: #ececee;
+    --pp-mini-rim: rgb(0 0 0 / 0.1);
+    --pp-ghost: rgb(255 255 255 / 0.55);
+    --pp-ghost-rim: rgb(0 0 0 / 0.08);
+    box-shadow:
+      0 0 0 1px rgb(0 0 0 / 0.08),
+      0 16px 40px -12px rgb(20 20 30 / 0.35);
+  }
+}
+@media (max-width: 400px) {
+  .pp {
+    width: min(320px, calc(100vw - 56px));
+  }
+}
+.pp p {
+  margin: 0;
+}
+.pp-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.pp-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 18px;
+}
+.pp-phase {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pp-ink-3);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pp-pct {
+  margin-top: 2px;
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 34px;
+  letter-spacing: -0.03em;
+}
+.pp-pct-u {
+  color: var(--pp-ink-3);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.pp-page {
+  margin-top: auto;
+}
+.pp-title,
+.pp-host,
+.pp-meta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pp-title {
+  font-weight: 500;
+  line-height: 18px;
+}
+.pp-host,
+.pp-meta {
+  color: var(--pp-ink-3);
+  font-size: 12px;
+  line-height: 16px;
+}
+.pp-bar {
+  position: relative;
+  height: 2px;
+  margin-top: 10px;
+  overflow: hidden;
+  border-radius: 1px;
+  background: var(--pp-track);
+}
+.pp-bar > i {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--pp-ink-2);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+}
+.pp[data-phase="stitching"] .pp-bar > i,
+.pp[data-phase="opening"] .pp-bar > i {
+  background: var(--pp-ink);
+}
+.pp-meta {
+  margin-top: 8px;
+}
+.pp .pp-act kbd {
+  padding: 0 4px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px var(--pp-ink-4);
+  color: var(--pp-ink-3);
+  font: inherit;
+  font-size: 10px;
+  line-height: 15px;
+  letter-spacing: 0.04em;
+}
+.pp-act {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  margin: -2px -5px -2px 0;
+  padding: 0 5px 0 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--pp-ink-3);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.pp-act:hover {
+  background: rgb(127 127 127 / 0.16);
+  color: var(--pp-ink);
+}
+.pp-mini {
+  position: relative;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--pp-mini);
+}
+.pp-mini::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--pp-mini-rim);
+  pointer-events: none;
+}
+.pp-mini::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 1;
+  height: 12px;
+  background: linear-gradient(var(--pp-mini), transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 240ms var(--ease);
+}
+.pp-mini[data-scrolled]::before {
+  opacity: 1;
+}
+.pp-film {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  transition: transform 480ms var(--ease-out);
+}
+.pp-ghost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 0;
+  background: var(--pp-ghost);
+  box-shadow: inset 0 0 0 1px var(--pp-ghost-rim);
+}
+.pp-film canvas {
+  position: absolute;
+  display: block;
+  animation: pp-develop 600ms var(--ease) both;
+}
+@keyframes pp-develop {
+  from {
+    opacity: 0;
+    filter: saturate(0) brightness(1.25);
+  }
+}
+.pp-edge {
+  position: absolute;
+  left: 0;
+  top: -1px;
+  z-index: 1000;
+  width: 100%;
+  height: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform 480ms var(--ease-out),
+    opacity 240ms var(--ease);
+}
+.pp-edge::before,
+.pp-edge::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+.pp-edge::before {
+  top: 0;
+  background: rgb(0 0 0 / 0.35);
+}
+.pp-edge::after {
+  bottom: 0;
+  background: rgb(255 255 255 / 0.75);
+}
+.pp[data-phase="capturing"] .pp-edge {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pp-film,
+  .pp-edge {
+    transition: none;
+  }
+  .pp-film canvas {
+    animation: none;
+  }
+  .dm-ring {
+    animation: none;
+  }
+}

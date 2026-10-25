@@ -1,0 +1,1022 @@
+/*
+ * Page Snap website. Typography-led and quiet, so the product (the demo) is the loudest thing on
+ * the page. Dark is the reference; light follows the system. The only colours are the product's
+ * own: annotation red and highlighter yellow, used as marks, never as decoration.
+ *
+ * The demo's stylesheet (lazy) brings the editor's own CSS in the `editor` layer, ordered after
+ * the reset (so the editor looks exactly like the extension) and below everything the site writes
+ * unlayered (so it can't restyle the page around it).
+ */
+@layer theme, base, editor, components, utilities;
+@import "tailwindcss" source(none);
+@import "./frame.css";
+@import "./panel.css";
+@source "../";
+
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/geist.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/fonts/geist-mono.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+/* Metric-matched fallback, so the swap to Geist doesn't move the hero. */
+@font-face {
+  font-family: "Geist Fallback";
+  src: local("Arial");
+  ascent-override: 95%;
+  descent-override: 22%;
+  line-gap-override: 0%;
+  size-adjust: 104%;
+}
+
+:root {
+  color-scheme: dark light;
+  --bg: #0b0b0c;
+  --bg-2: #121214;
+  --bg-3: #19191c;
+  --ink: #ededee;
+  --ink-2: rgb(237 237 238 / 0.7);
+  --ink-3: rgb(237 237 238 / 0.5);
+  --ink-4: rgb(237 237 238 / 0.24);
+  --line: rgb(255 255 255 / 0.08);
+  --line-2: rgb(255 255 255 / 0.14);
+  --red: #ff3b30;
+  --yellow: #ffcc00;
+  --focus: #ededee;
+  --btn: #ededee;
+  --btn-ink: #121214;
+  --btn-hover: #ffffff;
+  --code: #151517;
+  --shadow: 0 30px 80px -30px rgb(0 0 0 / 0.75), 0 0 0 1px rgb(255 255 255 / 0.07);
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --sans: "Geist", "Geist Fallback", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --gutter: clamp(20px, 5vw, 56px);
+  --max: 1180px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f5f5f6;
+    --bg-2: #ececee;
+    --bg-3: #e4e4e7;
+    --ink: #17171a;
+    --ink-2: rgb(23 23 26 / 0.78);
+    --ink-3: rgb(23 23 26 / 0.6);
+    --ink-4: rgb(23 23 26 / 0.26);
+    --line: rgb(0 0 0 / 0.08);
+    --line-2: rgb(0 0 0 / 0.14);
+    --red: #e8261b;
+    --focus: #17171a;
+    --btn: #17171a;
+    --btn-ink: #f7f7f8;
+    --btn-hover: #000000;
+    --code: #ebebed;
+    --shadow: 0 30px 80px -34px rgb(20 20 30 / 0.35), 0 0 0 1px rgb(0 0 0 / 0.08);
+  }
+}
+
+/* ------------------------------------------------------------------ base */
+
+html {
+  height: auto;
+  scroll-behavior: smooth;
+  scroll-padding-top: 80px;
+  -webkit-text-size-adjust: 100%;
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+body {
+  height: auto;
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+::selection {
+  background: rgb(255 204 0 / 0.55);
+  color: #111;
+}
+
+/* The editor inside the demo keeps its own focus ring (app.css). */
+:where(a, button, [tabindex], summary, textarea, input):not(.dm-ed *):focus {
+  outline: none;
+}
+:where(a, button, [tabindex], summary, textarea, input):not(.dm-ed *):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+.wrap {
+  width: min(var(--max), 100% - var(--gutter) * 2);
+  margin-inline: auto;
+}
+kbd,
+code {
+  font-family: var(--mono);
+  font-size: 0.86em;
+}
+.skip {
+  position: absolute;
+  left: 12px;
+  top: -60px;
+  z-index: 100;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--btn);
+  color: var(--btn-ink);
+}
+.skip:focus-visible {
+  top: 12px;
+}
+
+/* ------------------------------------------------------------------ top bar */
+
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--bg);
+  border-bottom: 1px solid transparent;
+  transition: border-color 200ms var(--ease);
+}
+.top[data-stuck] {
+  border-bottom-color: var(--line);
+}
+.top .wrap {
+  display: flex;
+  align-items: center;
+  height: 60px;
+  gap: 28px;
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+}
+.brand img {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+}
+.nav {
+  display: none;
+  gap: 26px;
+  margin-left: auto;
+  font-size: 14.5px;
+}
+.nav a {
+  color: var(--ink-2);
+  text-decoration: none;
+  transition: color 120ms var(--ease);
+}
+.nav a:hover {
+  color: var(--ink);
+}
+.gh {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  margin-left: auto;
+  padding: 0 12px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color 120ms var(--ease);
+}
+.gh:hover {
+  background: var(--bg-3);
+}
+.gh svg {
+  width: 16px;
+  height: 16px;
+}
+@media (min-width: 760px) {
+  .nav {
+    display: flex;
+  }
+  .gh {
+    margin-left: 0;
+  }
+}
+
+/* ------------------------------------------------------------------ hero */
+
+.hero {
+  display: grid;
+  gap: 26px;
+  padding: clamp(40px, 8vw, 88px) 0 clamp(36px, 5vw, 56px);
+}
+@media (min-width: 1024px) {
+  .hero {
+    grid-template-columns: minmax(0, 8fr) minmax(0, 4fr);
+    align-items: end;
+    column-gap: clamp(40px, 5vw, 72px);
+  }
+}
+.eyebrow {
+  margin: 0 0 8px;
+  color: var(--ink-3);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.hero h1 {
+  max-width: 13ch;
+  margin: 0;
+  font-size: clamp(2.75rem, 1.2rem + 5.4vw, 5.25rem);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.048em;
+  text-wrap: balance;
+}
+/* The headline's own mark: an underline in the product's red, drawn in once. */
+.mark-u {
+  position: relative;
+  white-space: nowrap;
+}
+.mark-u::after {
+  content: "";
+  position: absolute;
+  left: -0.02em;
+  right: -0.04em;
+  bottom: -0.02em;
+  height: max(3px, 0.06em);
+  border-radius: 99px;
+  background: var(--red);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+  transform-origin: 0 50%;
+  animation: draw-x 620ms 420ms var(--ease-out) both;
+}
+/* Box around words, like the Rectangle tool's mark. */
+.mark-box {
+  position: relative;
+  white-space: nowrap;
+}
+.mark-box::after {
+  content: "";
+  position: absolute;
+  inset: -0.02em -0.16em -0.1em -0.1em;
+  border: max(3px, 0.055em) solid var(--red);
+  border-radius: 0.1em;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+}
+/* Highlighter: the product's yellow, under dark ink so it reads in both schemes. */
+.mark-hl {
+  padding: 0 0.12em;
+  margin: 0 -0.06em;
+  border-radius: 2px;
+  background: rgb(255 204 0 / 0.92);
+  color: #141414;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+@keyframes draw-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+.lede {
+  max-width: 36ch;
+  margin: 0;
+  color: var(--ink-2);
+  font-size: clamp(1.06rem, 0.98rem + 0.4vw, 1.3rem);
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  text-wrap: pretty;
+}
+.ctas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 30px;
+}
+@media (min-width: 1024px) {
+  .hero-side {
+    padding-bottom: 0.4rem;
+  }
+  .ctas {
+    margin-top: 26px;
+  }
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  height: 46px;
+  padding: 0 20px;
+  border-radius: 10px;
+  font-size: 15.5px;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background-color 140ms var(--ease),
+    transform 140ms var(--ease),
+    box-shadow 140ms var(--ease);
+}
+.btn:active {
+  transform: translateY(1px) scale(0.99);
+}
+.btn svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+.btn-primary {
+  background: var(--btn);
+  color: var(--btn-ink);
+}
+.btn-primary:hover {
+  background: var(--btn-hover);
+}
+.btn-quiet {
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+@media (prefers-color-scheme: light) {
+  .btn-quiet {
+    background: #fff;
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.18);
+  }
+}
+.btn-quiet:hover {
+  background: var(--bg-3);
+}
+.btn-quiet .arr {
+  color: var(--ink-3);
+  transition: transform 160ms var(--ease);
+}
+.btn-quiet:hover .arr {
+  transform: translateY(2px);
+}
+
+/* ------------------------------------------------------------------ demo section */
+
+.demo-sec {
+  padding-bottom: clamp(72px, 10vw, 140px);
+}
+/* Reserve the frame's size before the demo chunk lands (no layout shift). */
+#demo-root {
+  min-height: var(--frame-h);
+  --frame-h: clamp(520px, 74svh, 760px);
+}
+
+/* ------------------------------------------------------------------ features */
+
+.features {
+  border-top: 1px solid var(--line);
+}
+.feat {
+  display: grid;
+  gap: 36px;
+  padding: clamp(64px, 9vw, 120px) 0;
+  border-bottom: 1px solid var(--line);
+}
+.feat h2,
+.pair h2,
+.install h2 {
+  margin: 0;
+  font-size: clamp(2rem, 1.3rem + 2.6vw, 3.2rem);
+  font-weight: 600;
+  line-height: 1.04;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+.copy > p,
+.pair section > p,
+.install .sub {
+  max-width: 44ch;
+  margin: 18px 0 0;
+  color: var(--ink-2);
+  font-size: 17.5px;
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+.copy > p + p {
+  margin-top: 12px;
+}
+.copy > .fine {
+  color: var(--ink-3);
+  font-size: 15px;
+}
+.copy kbd,
+.size-read kbd,
+.install kbd {
+  display: inline-block;
+  min-width: 1.5em;
+  padding: 0.05em 0.4em;
+  border-radius: 5px;
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    inset 0 -1px 0 var(--line-2);
+  color: var(--ink);
+  font-size: 0.82em;
+  line-height: 1.5;
+  text-align: center;
+  white-space: nowrap;
+}
+.soon {
+  display: inline-block;
+  margin-left: 12px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  vertical-align: 0.6em;
+}
+.visual {
+  position: relative;
+  min-width: 0;
+}
+@media (min-width: 900px) {
+  .feat-split {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    align-items: start;
+    gap: clamp(40px, 6vw, 96px);
+  }
+  .feat-split.wide-vis {
+    grid-template-columns: minmax(0, 4fr) minmax(0, 7fr);
+  }
+}
+
+/* Capture: the page develops screen by screen while the panel counts, like the real thing. */
+.cap-notes {
+  display: grid;
+  gap: 10px;
+  margin: 28px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-3);
+  font-size: 16px;
+  line-height: 1.5;
+}
+.cap-notes b {
+  color: var(--ink);
+  font-weight: 550;
+}
+/* Stitching, side by side, zoomed on the join between the first two screens. */
+.stitch {
+  display: grid;
+  gap: clamp(20px, 3vw, 32px);
+}
+@media (min-width: 640px) {
+  .stitch {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.stitch figure {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+.stitch figcaption {
+  color: var(--ink-3);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.stitch-ours {
+  color: var(--ink);
+}
+/* A window on page px 0..640 by 540..1000; the second screen starts at 760. */
+.seam {
+  --w: 640;
+  --top: 540;
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 640 / 460;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--line);
+}
+/* fernhill-seam.webp is page px 0..640 by 0..1000. */
+.seam img {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  max-width: none;
+  transform: translateY(calc(-100% * var(--top) / 1000));
+}
+/* The top bar, glued in again where the second screen begins. */
+.seam-dup {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% * (760 - 540) / 460);
+  height: calc(100% * 98 / 460);
+  overflow: hidden;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.18);
+}
+.seam-dup img {
+  transform: none;
+}
+.seam-mark {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: calc(100% * (760 - 540) / 460 - 5px);
+  height: calc(100% * 98 / 460 + 10px);
+  border-radius: 5px;
+  box-shadow: 0 0 0 3px var(--red);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .js [data-reveal] .seam-dup {
+    opacity: 0;
+    transform: translateY(-10px);
+    transition:
+      opacity 420ms 500ms var(--ease-out),
+      transform 520ms 500ms var(--ease-out);
+  }
+  .js [data-reveal] .seam-mark {
+    opacity: 0;
+    transform: scale(1.04);
+    transition:
+      opacity 320ms 1100ms var(--ease),
+      transform 420ms 1100ms var(--ease-out);
+  }
+  .js [data-reveal][data-in] .seam-dup,
+  .js [data-reveal][data-in] .seam-mark {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Markup: the tools as keys, each drawing its own mark with the editor's renderer. */
+.tools {
+  display: grid;
+  gap: 16px;
+}
+.tool-now {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 15px;
+}
+.tool-now kbd {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--red);
+  box-shadow: inset 0 -2px 0 rgb(0 0 0 / 0.22);
+  color: #fff;
+  font-size: 13px;
+}
+.stage-shot {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: var(--shadow);
+  aspect-ratio: 16 / 7;
+}
+.stage-shot canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+@media (max-width: 640px) {
+  .stage-shot {
+    aspect-ratio: 6 / 5;
+  }
+}
+
+/* Sized for AI: the page as a column, the copied part as a window, with its measures beside it. */
+.size {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+}
+.size-col {
+  position: relative;
+  width: clamp(150px, 26vw, 290px);
+  aspect-ratio: 1200 / 3338;
+  overflow: hidden;
+  border-radius: 6px;
+}
+.size-col img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.size-col .win {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 77%;
+  border-radius: 6px;
+  box-shadow:
+    inset 0 0 0 1.5px var(--red),
+    0 0 0 999px color-mix(in srgb, var(--bg) 62%, transparent);
+  transition:
+    top 700ms var(--ease-out),
+    height 700ms var(--ease-out);
+}
+.size-col .dot {
+  position: absolute;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1.5px var(--red);
+  opacity: 0;
+  transition: opacity 300ms var(--ease);
+}
+.size-col .dot[data-on] {
+  opacity: 1;
+}
+.size-scale {
+  position: relative;
+  width: 140px;
+  /* Same height as the column (the caption below it isn't part of the scale). */
+  margin-bottom: 36px;
+}
+.br {
+  position: absolute;
+  left: 0;
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  padding-left: 16px;
+  color: var(--ink-3);
+  font-size: 13.5px;
+  line-height: 1.35;
+  transition:
+    top 700ms var(--ease-out),
+    height 700ms var(--ease-out);
+}
+.br::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  border: 1.5px solid var(--ink-4);
+  border-left: 0;
+  border-radius: 0 3px 3px 0;
+}
+.br b {
+  color: var(--ink);
+  font-size: 19px;
+  font-weight: 550;
+  letter-spacing: -0.02em;
+}
+.size-fig {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+}
+.size-fig figcaption {
+  color: var(--ink-3);
+  font-size: 14px;
+}
+.br-win {
+  top: 0;
+  height: 77%;
+}
+.br-win::before {
+  border-color: var(--red);
+}
+.br kbd {
+  font-size: 0.9em;
+}
+
+/* Send to and privacy sit side by side: two short lists, no boxes. */
+.pair {
+  display: grid;
+  gap: clamp(56px, 8vw, 72px);
+  padding: clamp(64px, 9vw, 120px) 0;
+  border-bottom: 1px solid var(--line);
+}
+@media (min-width: 900px) {
+  .pair {
+    grid-template-columns: 1fr 1fr;
+    gap: clamp(48px, 6vw, 96px);
+  }
+}
+.pair h2 {
+  font-size: clamp(1.8rem, 1.3rem + 1.8vw, 2.6rem);
+}
+.sendto {
+  width: min(100%, 300px);
+  margin-top: 32px;
+  padding: 6px;
+  border-radius: 10px;
+  background: var(--bg-2);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    0 18px 40px -20px rgb(0 0 0 / 0.6);
+  font-size: 14.5px;
+}
+.sendto-head {
+  padding: 6px 10px 8px;
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+.sendto ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sendto li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: var(--ink);
+}
+.sendto-web {
+  margin: 0;
+  padding: 6px 10px 7px;
+  color: var(--ink-3);
+  font-size: 13.5px;
+}
+@media (prefers-color-scheme: light) {
+  .sendto {
+    background: #fff;
+    box-shadow:
+      0 0 0 1px rgb(0 0 0 / 0.1),
+      0 14px 30px -18px rgb(20 20 30 / 0.3);
+  }
+  .sendto li[data-hot] {
+    background: rgb(0 0 0 / 0.06);
+  }
+}
+.sendto li[data-hot] {
+  background: var(--line-2);
+}
+.sendto hr {
+  height: 1px;
+  margin: 5px 4px;
+  border: 0;
+  background: var(--line);
+}
+.perms {
+  display: grid;
+  gap: 0;
+  margin: 32px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.perms li {
+  display: grid;
+  grid-template-columns: minmax(0, 11.5em) minmax(0, 1fr);
+  gap: 16px;
+  padding: 7px 0;
+  font-size: 15px;
+}
+.perms code {
+  color: var(--ink);
+  font-size: 13.5px;
+}
+.perms li > span {
+  color: var(--ink-2);
+}
+.pair .perms-no {
+  margin-top: 18px;
+  color: var(--ink-3);
+  font-size: 15px;
+  line-height: 1.6;
+}
+.perms-no s {
+  text-decoration-color: var(--red);
+  text-decoration-thickness: 2px;
+}
+@media (max-width: 480px) {
+  .perms li {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
+/* ------------------------------------------------------------------ install */
+
+.install {
+  padding: clamp(72px, 10vw, 140px) 0 clamp(56px, 8vw, 96px);
+}
+.steps {
+  display: grid;
+  gap: 0;
+  margin: 44px 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+.steps > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 26px 0;
+  border-top: 1px solid var(--line);
+}
+@media (min-width: 900px) {
+  .steps > li {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 8fr);
+    gap: 40px;
+  }
+}
+.steps h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.steps h3::before {
+  counter-increment: step;
+  content: counter(step);
+  display: inline-block;
+  width: 1.6em;
+  color: var(--ink-4);
+  font-variant-numeric: tabular-nums;
+}
+.steps li > p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  max-width: 60ch;
+  color: var(--ink-2);
+  font-size: 16.5px;
+}
+.code {
+  position: relative;
+  margin: 0 0 14px;
+  border-radius: 10px;
+  background: var(--code);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.code pre {
+  margin: 0;
+  padding: 16px 18px;
+  overflow-x: auto;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+.code pre .c {
+  color: var(--ink-3);
+}
+.copy-btn {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition:
+    background-color 120ms var(--ease),
+    color 120ms var(--ease);
+}
+.copy-btn:hover {
+  background: var(--line);
+  color: var(--ink);
+}
+.copy-btn svg {
+  width: 17px;
+  height: 17px;
+}
+.copy-btn[data-done] {
+  color: var(--ink);
+}
+.keys {
+  display: grid;
+  gap: 0 40px;
+  margin: 56px 0 0;
+}
+@media (min-width: 760px) {
+  .keys {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.keys div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 15px;
+}
+.keys dt {
+  color: var(--ink-2);
+}
+.keys dd {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+/* ------------------------------------------------------------------ footer */
+
+.foot {
+  padding: 44px 0 56px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: 14.5px;
+}
+.foot .wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px 32px;
+}
+.foot nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+}
+.foot a {
+  color: var(--ink-2);
+  text-decoration: none;
+}
+.foot a:hover {
+  color: var(--ink);
+}
+
+/* ------------------------------------------------------------------ reveal */
+
+@media (prefers-reduced-motion: no-preference) {
+  .js [data-reveal] {
+    opacity: 0;
+    transform: translateY(14px);
+    transition:
+      opacity 700ms var(--ease-out),
+      transform 700ms var(--ease-out);
+  }
+  .js [data-reveal][data-in] {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mark-u::after {
+    animation: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .code pre {
+    padding: 14px;
+    font-size: 12px;
+  }
+}

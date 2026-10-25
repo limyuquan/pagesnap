@@ -1,0 +1,9 @@
+{
+  // The website (site/): the landing page and the demo, which compiles the real editor from src/.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "resolveJsonModule": true,
+    "types": ["vite/client"]
+  },
+  "include": ["../.wxt/wxt.d.ts", "src"]
+}
