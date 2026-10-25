@@ -29,6 +29,7 @@ const TARGETS = {
   teamPrice: '#team-card .price b',
   plusBilled: '.plan.featured .billed',
   plusOffline: '.plan.featured li:nth-child(4)',
+  plusButton: '.plan.featured .btn',
 };
 
 const LAYOUTS = [

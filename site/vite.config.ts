@@ -23,8 +23,12 @@ const SITE_URL = process.env.SITE_URL ?? 'https://limyuquan.github.io/pagesnap/'
  */
 function extensionIcons(): Plugin {
   const dir = r('../public/icon');
+  let base = '/';
   return {
     name: 'pagesnap-extension-icons',
+    configResolved(config) {
+      base = config.base;
+    },
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const m = /^\/(?:.*\/)?icon\/(\d+\.png)$/.exec(req.url?.split('?')[0] ?? '');
@@ -48,7 +52,9 @@ function extensionIcons(): Plugin {
         }
       }
     },
-    transformIndexHtml: (html) => html.replaceAll('%SITE_URL%', SITE_URL),
+    // Vite rebases public files in index.html, but these live outside `publicDir`.
+    transformIndexHtml: (html) =>
+      html.replaceAll('%SITE_URL%', SITE_URL).replaceAll('"/icon/', `"${base}icon/`),
   };
 }
 

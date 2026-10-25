@@ -270,6 +270,11 @@ export function Demo({ autoStart = false }: { autoStart?: boolean }) {
                 </span>
               )}
             </div>
+            {!hasEditor && !capturing && (
+              <span className="dm-cue" aria-hidden="true">
+                Capture this page <span>→</span>
+              </span>
+            )}
             <button
               type="button"
               className="dm-ext"
@@ -310,11 +315,6 @@ export function Demo({ autoStart = false }: { autoStart?: boolean }) {
           {progress && (
             <div className="dm-pop">
               <ProgressPanel progress={progress} page={page} stopping={stopping} onStop={stop} />
-            </div>
-          )}
-          {!hasEditor && !capturing && (
-            <div className="dm-coach" aria-hidden="true">
-              {touch ? 'Tap' : 'Click'} Page Snap to capture this page
             </div>
           )}
           {shield && (

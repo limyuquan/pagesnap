@@ -106,33 +106,6 @@
   }
 }
 
-/* First-run coach mark under the icon. */
-.dm-coach {
-  position: absolute;
-  top: 10px;
-  right: 14px;
-  z-index: 10;
-  padding: 7px 11px;
-  border-radius: 8px;
-  background: #1c1c1e;
-  box-shadow: 0 8px 24px -8px rgb(0 0 0 / 0.5);
-  color: #f2f2f3;
-  font-size: 13px;
-  pointer-events: none;
-  animation: dm-drop 400ms 700ms var(--ease-out) both;
-}
-.dm-coach::before {
-  content: "";
-  position: absolute;
-  top: -5px;
-  right: 18px;
-  width: 10px;
-  height: 10px;
-  background: inherit;
-  transform: rotate(45deg);
-  border-radius: 2px;
-}
-
 /* Touch: a finger on an inactive capture scrolls the page; a tap starts drawing. */
 .dm-shield {
   position: absolute;

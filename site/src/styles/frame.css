@@ -15,6 +15,9 @@
 }
 @media (prefers-color-scheme: light) {
   .dm {
+    --frame-shadow:
+      0 0 0 1px rgb(0 0 0 / 0.12), 0 1px 2px rgb(0 0 0 / 0.06),
+      0 14px 36px -8px rgb(20 20 30 / 0.16);
     --chrome: #dee1e6;
     --chrome-2: #ffffff;
     --chrome-ink: #202124;
@@ -30,7 +33,7 @@
   overflow: hidden;
   border-radius: 12px;
   background: var(--chrome);
-  box-shadow: var(--shadow);
+  box-shadow: var(--frame-shadow, var(--shadow));
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 13px;
   line-height: 1.4;
@@ -142,6 +145,38 @@
   color: var(--chrome-ink);
   font-size: 12px;
   font-weight: 500;
+}
+/* First-run cue, in the toolbar next to the icon: it never covers the page. */
+.dm-cue {
+  flex: none;
+  color: var(--chrome-ink);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  animation: dm-cue-in 400ms 600ms var(--ease-out) both;
+}
+.dm-cue span {
+  display: inline-block;
+  margin-left: 2px;
+  color: var(--red);
+  animation: dm-nudge 1.6s var(--ease) infinite;
+}
+@keyframes dm-cue-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+}
+@keyframes dm-nudge {
+  50% {
+    transform: translateX(3px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dm-cue,
+  .dm-cue span {
+    animation: none;
+  }
 }
 .dm-ext {
   position: relative;
@@ -258,5 +293,8 @@
   .dm-ext {
     width: 40px;
     height: 40px;
+  }
+  .dm-omni {
+    padding: 0 10px;
   }
 }

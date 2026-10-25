@@ -1,0 +1,54 @@
+# Builds the website (site/) and publishes it to GitHub Pages.
+#
+# Not active yet: it only runs when started by hand (Actions → "Website" → Run workflow), and
+# Pages must first be switched on in the repo settings (Settings → Pages → Source: GitHub
+# Actions). To deploy on every push to main once that's approved, uncomment the `push` trigger.
+#
+# SITE_BASE is the path the site is served under: `/pagesnap/` for
+# https://limyuquan.github.io/pagesnap/, or `/` with a custom domain (then also set SITE_URL and
+# add site/public/CNAME).
+name: Website
+
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [main]
+  #   paths: [site/**, src/editor/**, src/shared/**, src/compositor/**, src/styles/**, public/icon/**]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      SITE_BASE: /pagesnap/
+      SITE_URL: https://limyuquan.github.io/pagesnap/
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm site:build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

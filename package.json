@@ -27,6 +27,7 @@
     "site:build": "vite build --config site/vite.config.ts",
     "site:preview": "vite preview --config site/vite.config.ts",
     "site:render": "node site/scripts/render-demo-page.mjs",
+    "site:test": "playwright test --config site/playwright.config.ts",
     "postinstall": "wxt prepare"
   },
   "dependencies": {

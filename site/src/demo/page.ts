@@ -13,7 +13,8 @@ export type TargetName =
   | 'teamCard'
   | 'teamPrice'
   | 'plusBilled'
-  | 'plusOffline';
+  | 'plusOffline'
+  | 'plusButton';
 
 export interface Box {
   x: number;

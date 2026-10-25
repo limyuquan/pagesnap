@@ -61,7 +61,10 @@ try {
         await page.waitForTimeout(2600);
         await page.screenshot({ path: `${out}/${s.name}-${scheme}-${name}.png` });
       }
-      console.log(`${s.name} ${scheme}`);
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      console.log(`${s.name} ${scheme}${overflow > 0 ? ` HORIZONTAL OVERFLOW ${overflow}px` : ''}`);
       await ctx.close();
     }
   }

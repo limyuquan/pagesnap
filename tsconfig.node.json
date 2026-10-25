@@ -4,5 +4,13 @@
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": [".wxt/wxt.d.ts", "*.config.ts", "scripts", "tests/e2e", "src/shared/e2e.ts"]
+  "include": [
+    ".wxt/wxt.d.ts",
+    "*.config.ts",
+    "scripts",
+    "tests/e2e",
+    "src/shared/e2e.ts",
+    "site/*.config.ts",
+    "site/e2e"
+  ]
 }
