@@ -26,8 +26,10 @@ Plan: [docs/PLAN.md](docs/PLAN.md). Contracts and conventions: [docs/CONTRACTS.m
   line.
 - **Undo/redo:** `⌘Z` / `⇧⌘Z`. **Zoom:** `⌘+` / `⌘-`, `⌘0` fit width, `⌘1` 100%.
 - **Copy:** `⌘C` copies the whole page if it's at most 2576 px tall (what AI chats read at full
-  resolution); on taller pages it copies the area around your marks. `⇧⌘C` always copies the full
-  page. The toast says what was copied and its size.
+  resolution). On taller pages it copies 2576 px around your marks, starting from the top of the
+  page when the marks fit there; with no marks, from where you're looking down. `⇧⌘C` always
+  copies the full page. The copied area flashes, and the toast says what was copied and its size.
+  You can also right-click the canvas and choose Copy image.
 - **Download:** the download button or `⌘S` saves the full page as PNG at full resolution.
 - Marks are saved automatically; reopening the editor tab keeps them. Settings (starting colour,
   copy size, contrast shadow) are on the extension's options page.
